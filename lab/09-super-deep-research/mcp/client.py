@@ -38,6 +38,9 @@ class MCPClient:
     def connect_all(self) -> list[dict]:
         all_tools: list[dict] = []
         for name, cfg in self.config.get("mcpServers", {}).items():
+            if cfg.get("enabled", True) is False:
+                print(f"  [-] {name}: disabled")
+                continue
             transport = cfg.get("type", "stdio")
             try:
                 if transport == "sse":

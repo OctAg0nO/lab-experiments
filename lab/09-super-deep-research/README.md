@@ -53,12 +53,14 @@ python -m lab.09-super-deep-research.main
 
 ## MCP Servers
 
-| Server | Transport | Tools |
-|--------|-----------|-------|
-| `crawl4ai` | SSE | `md`, `html`, `crawl`, `screenshot` |
-| `fetch` | stdio | `fetch` |
-| `openrouter` | stdio | `chat`, `model_list`, `consensus`, `ensemble`, `usage_stats` |
-| `filesystem` | stdio | `read`, `write`, `search` |
+| Server | Transport | Enabled | Tools |
+|--------|-----------|---------|-------|
+| `crawl4ai` | SSE | ✅ | `md`, `html`, `crawl`, `screenshot` |
+| `fetch` | stdio | ✅ | `fetch` |
+| `openrouter` | stdio | ❌ (opt-in) | `chat`, `model_list`, `consensus`, `ensemble`, `usage_stats` |
+| `filesystem` | stdio | ✅ | `read`, `write`, `search` |
+
+Toggle servers by setting `"enabled": false` in `config/mcp_servers.json`. Disabled servers are skipped at startup with a `[-]` log line.
 
 ## Key Patterns
 

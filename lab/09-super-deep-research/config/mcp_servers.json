@@ -2,23 +2,27 @@
   "mcpServers": {
     "crawl4ai": {
       "description": "Deep web scraping and content extraction",
+      "enabled": true,
       "type": "sse",
       "url": "http://localhost:11235/mcp/sse"
     },
     "fetch": {
       "description": "Quick URL fetching and markdown extraction",
+      "enabled": true,
       "type": "stdio",
       "command": "uvx",
       "args": ["mcp-server-fetch"]
     },
     "openrouter": {
       "description": "Access 100+ models, collective intelligence, benchmarking, model routing",
+      "enabled": false,
       "type": "stdio",
       "command": "npx",
       "args": ["@physics91/openrouter-mcp", "start"]
     },
     "filesystem": {
       "description": "Local file read/write for research artifacts",
+      "enabled": true,
       "type": "stdio",
       "command": "uvx",
       "args": ["mcp-server-filesystem", "--allowed-directories", "./research_output"]
