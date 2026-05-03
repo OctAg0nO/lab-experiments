@@ -92,11 +92,10 @@ print(f"Accuracy: {mipro_score:.2%}\n")
 print("=== BetterTogether (GEPA → BootstrapFinetune → GEPA) ===")
 bt = dspy.BetterTogether(
     metric=exact_match,
-    p=dspy.GEPA(metric=exact_match, max_iters=3),
+    p=dspy.GEPA(metric=exact_match, max_full_evals=3),
     w=dspy.BootstrapFinetune(metric=exact_match),
-    strategy="p -> w -> p"
 )
-bt_program = bt.compile(dspy.ChainOfThought(NumClassify), trainset=trainset)
+bt_program = bt.compile(dspy.ChainOfThought(NumClassify), trainset=trainset, strategy="p -> w -> p")
 bt_score = evaluator(bt_program)
 print(f"Accuracy: {bt_score:.2%}\n")
 

@@ -22,7 +22,6 @@ class ResearchDirection:
     parent_topic: str | None = None
     seed_query: str = ""
 
-    @property
     def ucb_score(self, total_explorations: int, exploration_constant: float = 1.4) -> float:
         if self.exploration_depth == 0:
             return float("inf")
@@ -60,14 +59,14 @@ class DaprFrontier:
         self._load()
 
     def _load(self):
-        raw = self._store.get_state(key=self._key)
-        if raw and raw.get("data"):
-            data = raw["data"]
+        raw = self._store.load(key=self._key)
+        if raw:
+            data = raw if isinstance(raw, dict) else {}
             self.directions = [ResearchDirection.from_dict(d) for d in data.get("directions", [])]
             self._total_explorations = data.get("total_explorations", 0)
 
     def _save(self):
-        self._store.save_state(key=self._key, value={
+        self._store.save(key=self._key, value={
             "directions": [d.to_dict() for d in self.directions],
             "total_explorations": self._total_explorations,
         })

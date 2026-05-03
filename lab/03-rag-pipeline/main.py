@@ -32,6 +32,7 @@ devset = [dspy.Example(**x).with_inputs("question") for x in dataset.dev]
 
 class RAG(dspy.Module):
     def __init__(self, k=3):
+        self.k = k
         self.retrieve = dspy.ColBERTv2(url="http://20.102.90.50:2017/wiki17_abstracts")
         self.generate = dspy.ChainOfThought("context, question -> answer")
 
@@ -48,7 +49,7 @@ def gold_answer_metric(example, prediction, trace=None):
 
 rag = RAG()
 evaluator = dspy.Evaluate(devset=devset, metric=gold_answer_metric, num_threads=8)
-baseline = evaluator(rag)
+baseline = evaluator(rag).score / 100.0
 print(f"Baseline accuracy: {baseline:.2%}")
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,6 @@ print(f"Baseline accuracy: {baseline:.2%}")
 optimizer = dspy.BootstrapFewShot(metric=gold_answer_metric, max_bootstrapped_demos=4, max_labeled_demos=4)
 optimized_rag = optimizer.compile(rag, trainset=trainset)
 
-optimized_score = evaluator(optimized_rag)
+optimized_score = evaluator(optimized_rag).score / 100.0
 print(f"Optimized accuracy: {optimized_score:.2%}")
 print(f"Improvement: {optimized_score - baseline:+.2%}")

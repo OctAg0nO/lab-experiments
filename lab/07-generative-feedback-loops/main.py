@@ -242,14 +242,14 @@ student_lm = dspy.LM("ollama_chat/gemma4")
 
 # Student using the weak model alone (no teacher)
 student_alone = dspy.ChainOfThought(ClassifyIntent)
-student_alone.lm = student_lm
+student_alone.set_lm(student_lm)
 alone_score = eval_score(student_alone)
 print(f"   Student alone (Gemma 4):       {alone_score:.0%}")
 
 # BootstrapFewShot with teacher (DeepSeek generates demos, Gemma 4 uses them)
 teacher = dspy.ChainOfThought(ClassifyIntent)
 student = dspy.ChainOfThought(ClassifyIntent)
-student.lm = student_lm
+student.set_lm(student_lm)
 
 ts_bs = dspy.BootstrapFewShot(
     metric=intent_metric,

@@ -25,7 +25,6 @@ class ResearchDirection:
     parent_topic: str | None = None  # derived from which topic
     seed_query: str = ""             # initial search query used
 
-    @property
     def ucb_score(self, total_explorations: int, exploration_constant: float = 1.4) -> float:
         if self.exploration_depth == 0:
             return float("inf")

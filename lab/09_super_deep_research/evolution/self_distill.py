@@ -20,7 +20,7 @@ class SelfDistill:
     back into the agent's policy for the next call.
     """
 
-    def __init__(self, agent: dspy.RLM):
+    def __init__(self, agent: dspy.Module):
         self.agent = agent
         self.history: list[dict] = []
 

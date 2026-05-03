@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from dapr_agents import DurableAgent
 from dapr_agents.llm import DaprChatClient
 from dapr_agents.agents.configs import (
-    AgentStateConfig, AgentExecutionConfig, WorkflowRetryPolicy,
+    AgentStateConfig, AgentExecutionConfig,
 )
 from dapr_agents.storage.daprstores.stateservice import StateStoreService
 from dapr_agents.workflow import workflow_entry
@@ -55,13 +55,12 @@ class ResearchWorkflow(DurableAgent):
             state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
             execution=AgentExecutionConfig(
                 max_iterations=30,
-                retry_policy=WorkflowRetryPolicy(max_retry_attempts=2, retry_backoff_interval_seconds=3),
             ),
             **kwargs,
         )
 
     @workflow_entry
-    def run_research(self, ctx, input: dict) -> dict:
+    def run_research(self, ctx, input: dict):
         query = input.get("query", "")
         max_iter = input.get("max_iterations", 6)
         yield ctx.set_state("research_started_at", datetime.now(timezone.utc).isoformat())
@@ -80,7 +79,6 @@ class ResearchWorkflow(DurableAgent):
 
             topic = direction.topic
 
-            # Select agent via DSPy ChainOfThought
             selection = self._agent_selector(
                 exploration_depth=direction.exploration_depth,
                 confidence=direction.confidence,
@@ -110,7 +108,6 @@ class ResearchWorkflow(DurableAgent):
                     self.frontier.seed_from_directions(gaps, parent=topic)
                     self.frontier.absorb_findings(topic, 0.15, 0, gaps)
 
-            # Heartbeat every 3 iterations
             if iteration % 3 == 0:
                 yield ctx.set_state("heartbeat_frontier", self.frontier.summary())
                 yield ctx.set_state("heartbeat_findings_count", len(self.all_findings))
@@ -126,7 +123,6 @@ class ResearchWorkflow(DurableAgent):
             self.lse.record_run(f"iter_{iteration}", state, topic)
             yield ctx.set_state(f"lse_iter_{iteration}", {"quality": state})
 
-        # Final checkpoint
         yield ctx.set_state("research_completed_at", datetime.now(timezone.utc).isoformat())
         yield ctx.set_state("final_iterations", iteration)
         yield ctx.set_state("final_findings_count", len(self.all_findings))

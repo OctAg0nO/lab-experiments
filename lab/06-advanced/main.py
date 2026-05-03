@@ -36,27 +36,29 @@ print(f"Answer after chain comparison: {result.answer}")
 print()
 
 # ---------------------------------------------------------------------------
-# 2. Parallel execution
+# 2. Parallel execution via Module.batch
 # ---------------------------------------------------------------------------
-print("=== Parallel ===")
+print("=== Module.batch (parallel) ===")
 
 class Summarize(dspy.Signature):
     text: str = dspy.InputField()
     summary: str = dspy.OutputField()
 
-par = dspy.Parallel(Summarize, n=3)
 texts = [
     "Python is a high-level general-purpose programming language.",
     "DSPy is a framework for programming language models.",
     "Dapr provides distributed application runtime capabilities.",
 ]
-results = par(text=texts)
+
+prog = dspy.ChainOfThought(Summarize)
+examples = [dspy.Example(text=t).with_inputs("text") for t in texts]
+results = prog.batch(examples, num_threads=3)
 for i, r in enumerate(results):
     print(f"Summary {i+1}: {r.summary}")
 print()
 
 # ---------------------------------------------------------------------------
-# 3. Ensemble — combine multiple predictions
+# 3. Ensemble — combine multiple predictions via compile()
 # ---------------------------------------------------------------------------
 print("=== Ensemble ===")
 
@@ -64,11 +66,9 @@ class Classify(dspy.Signature):
     text: str = dspy.InputField()
     label: str = dspy.OutputField()
 
-ensemble = dspy.Ensemble(
-    dspy.ChainOfThought(Classify),
-    dspy.Predict(Classify),
-)
-result = ensemble(text="This movie was surprisingly good!")
+ensemble = dspy.Ensemble()
+compiled = ensemble.compile([dspy.ChainOfThought(Classify), dspy.Predict(Classify)])
+result = compiled(text="This movie was surprisingly good!")
 print(f"Ensemble label: {result.label}")
 print()
 
@@ -93,7 +93,7 @@ print(f"JSONAdapter result: name={result.name}, age={result.age}")
 print("\n=== Streaming ===")
 dspy.configure(adapter=dspy.ChatAdapter())  # reset adapter
 
-stream_gen = dspy.ChainOfThought("topic -> haiku").streamify()
+stream_gen = dspy.streamify(dspy.ChainOfThought("topic -> haiku"), async_streaming=False)
 for chunk in stream_gen(topic="programming"):
     print(chunk, end="", flush=True)
 print("\n")

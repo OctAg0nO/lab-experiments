@@ -40,6 +40,6 @@ class MCPBridge:
             def make(srv=srv, tn=tn):
                 def fn(**kwargs: Any) -> str:
                     return self.client.call_tool(srv, tn, kwargs)
-                return AgentTool(name=tn, description=desc or f"MCP tool {tn}", func=fn)
+                return AgentTool(name=tn, description=desc or f"MCP tool {tn}", func=fn, args_model=None)
             tools.append(make())
         return tools

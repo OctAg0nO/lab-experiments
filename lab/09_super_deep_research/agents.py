@@ -57,7 +57,7 @@ class Critique(BaseModel):
 # Agent factory
 # ---------------------------------------------------------------------------
 
-def create_explorer(tools: list, lm: dspy.LM) -> dspy.RLM:
+def create_explorer(tools: list, lm: dspy.LM):
     return dspy.RLM(
         "task: str -> result: ExplorationResult",
         tools=tools,
@@ -67,7 +67,7 @@ def create_explorer(tools: list, lm: dspy.LM) -> dspy.RLM:
     )
 
 
-def create_deep_reader(tools: list, lm: dspy.LM) -> dspy.RLM:
+def create_deep_reader(tools: list, lm: dspy.LM):
     return dspy.RLM(
         "topic: str, url: str -> result: DeepReadResult",
         tools=tools,
@@ -77,7 +77,7 @@ def create_deep_reader(tools: list, lm: dspy.LM) -> dspy.RLM:
     )
 
 
-def create_synthesizer(tools: list, lm: dspy.LM) -> dspy.RLM:
+def create_synthesizer(tools: list, lm: dspy.LM):
     return dspy.RLM(
         "task: str, findings: str -> result: SynthesisReport",
         tools=tools,
@@ -87,7 +87,7 @@ def create_synthesizer(tools: list, lm: dspy.LM) -> dspy.RLM:
     )
 
 
-def create_critic(lm: dspy.LM) -> dspy.RLM:
+def create_critic(lm: dspy.LM):
     return dspy.RLM(
         "research_summary: str -> result: Critique",
         tools=[],
