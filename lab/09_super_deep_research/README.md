@@ -35,7 +35,7 @@ Evolution:
 
 ```bash
 # Crawl4AI
-docker compose -f lab/09-super-deep-research/docker-compose.yml up -d
+docker compose -f lab/09_super_deep_research/docker-compose.yml up -d
 
 # OpenRouter MCP (requires Node.js 16+)
 npx @physics91/openrouter-mcp init
@@ -48,7 +48,10 @@ npx @physics91/openrouter-mcp init
 ## Running
 
 ```bash
-python -m lab.09-super-deep-research.main
+# From project root:
+python -m lab.09_super_deep_research.cli --query "your topic"
+python -m lab.09_super_deep_research.cli --chat
+python -m lab.09_super_deep_research.cli --status
 ```
 
 ## MCP Servers

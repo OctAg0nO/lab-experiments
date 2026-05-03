@@ -2,11 +2,11 @@
 CLI for the Super Deep Research platform.
 
 Usage:
-    python -m lab.09-super-deep-research.cli --query "your research topic"
-    python -m lab.09-super-deep-research.cli --chat
-    python -m lab.09-super-deep-research.cli --status
-    python -m lab.09-super-deep-research.cli --list-servers
-    python -m lab.09-super-deep-research.cli --disable-server openrouter
+    python -m lab.09_super_deep_research.cli --query "your research topic"
+    python -m lab.09_super_deep_research.cli --chat
+    python -m lab.09_super_deep_research.cli --status
+    python -m lab.09_super_deep_research.cli --list-servers
+    python -m lab.09_super_deep_research.cli --disable-server openrouter
 """
 
 from __future__ import annotations
@@ -275,11 +275,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python -m lab.09-super-deep-research.cli --query \"DSPy optimization benchmarks\"\n"
-            "  python -m lab.09-super-deep-research.cli --chat\n"
-            "  python -m lab.09-super-deep-research.cli --status\n"
-            "  python -m lab.09-super-deep-research.cli --list-servers\n"
-            "  python -m lab.09-super-deep-research.cli --disable-server openrouter\n"
+            "  python -m lab.09_super_deep_research.cli --query \"DSPy optimization benchmarks\"\n"
+            "  python -m lab.09_super_deep_research.cli --chat\n"
+            "  python -m lab.09_super_deep_research.cli --status\n"
+            "  python -m lab.09_super_deep_research.cli --list-servers\n"
+            "  python -m lab.09_super_deep_research.cli --disable-server openrouter\n"
         ),
     )
 
