@@ -237,5 +237,119 @@ def distill(ctx: click.Context):
     console.print("[green]Distillation complete.[/]")
 
 
+@cli.command()
+@click.pass_context
+def chat(ctx: click.Context):
+    """Interactive research REPL. Type queries or /commands."""
+    console.print(Panel("[bold]Interactive Research Chat[/]\nType a research query or /help for commands.", style="cyan"))
+
+    import shutil
+
+    frontier = InMemoryFrontier()
+    lse = LSEOptimizer()
+    agent_selector = dspy.ChainOfThought(SelectAgent)
+    history: list[str] = []
+    max_iter = ctx.obj["ITERATIONS"]
+
+    try:
+        client = MCPClient(str(CONFIG_PATH))
+        tool_defs = client.connect_all()
+        bridge = MCPBridge(client, tool_defs)
+        console.print(f"  [dim]{len(tool_defs)} MCP tool(s) ready[/]")
+    except Exception:
+        bridge = None
+        console.print("  [dim]No MCP tools available[/]")
+
+    agents_compiled = False
+
+    while True:
+        try:
+            line = input("\n[1m[?][0m ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not line:
+            continue
+
+        if line.startswith("/"):
+            parts = line.split(maxsplit=1)
+            match parts[0]:
+                case "/help":
+                    console.print("[bold]Commands:[/]")
+                    console.print("  /query <text>    Set research query")
+                    console.print("  /status          Show frontier + LSE state")
+                    console.print("  /frontier        List all frontier directions")
+                    console.print("  /history         Show recent queries")
+                    console.print("  /iterations <N>  Set max iterations")
+                    console.print("  /compile         Compile agents with current data")
+                    console.print("  /quit            Exit")
+                case "/status":
+                    console.print(f"  Frontier: {frontier.summary()}")
+                    console.print(f"  Iterations: {len(lse.runs)}")
+                    trend = lse.improvement_trend()
+                    if trend:
+                        console.print(f"  LSE trend: {[f'{t:+.2f}' for t in trend]}")
+                    console.print(f"  MCP: {'connected' if bridge else 'unavailable'}")
+                    console.print(f"  Agents compiled: {agents_compiled}")
+                case "/frontier":
+                    table = Table(title="Frontier Directions", header_style="bold cyan")
+                    table.add_column("Topic", style="cyan")
+                    table.add_column("Confidence")
+                    table.add_column("Depth")
+                    table.add_column("Sources")
+                    for d in frontier.directions:
+                        table.add_row(d.topic[:50], f"{d.confidence:.2f}", str(d.exploration_depth), str(d.source_count))
+                    console.print(table)
+                case "/history":
+                    for h in history[-10:]:
+                        console.print(f"  {h[:80]}")
+                case "/iterations":
+                    if len(parts) > 1:
+                        max_iter = max(1, int(parts[1]))
+                        console.print(f"  Max iterations set to {max_iter}")
+                    else:
+                        console.print(f"  Current: {max_iter}")
+                case "/compile":
+                    if bridge:
+                        agents_data = [
+                            (ExplorerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+                             [dspy.Example(topic="research", hypotheses=["subtopic"]).with_inputs("topic")]),
+                            (DeepReaderAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+                             [dspy.Example(findings_summary="finding", validated_claims=["claim"], contradictions=[]).with_inputs("findings_summary")]),
+                            (SynthesizerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+                             [dspy.Example(task="research", synthesis="synthesis", key_insights=["insight"], gaps=["gap"]).with_inputs("task")]),
+                            (CriticAgent(llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+                             [dspy.Example(research_summary="research", critique="critique", improved_critique="improved").with_inputs("research_summary", "critique")]),
+                        ]
+                        for agent, trainset in agents_data:
+                            agent.compile(trainset)
+                        agents_compiled = True
+                        console.print("  [green]Agents compiled[/]")
+                    else:
+                        console.print("  [yellow]MCP required for compilation[/]")
+                case "/quit":
+                    break
+                case _:
+                    console.print(f"  Unknown: {parts[0]}. Type /help")
+        else:
+            frontier.seed_from_query(line)
+            history.append(line)
+            with console.status(f"[bold green]Researching:[/] {line}") as status:
+                for i in range(max_iter):
+                    direction = frontier.next_action()
+                    if not direction:
+                        break
+                    selection = agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
+                    frontier.absorb_findings(direction.topic, 0.2, 1, [])
+                    state = {"num_directions": len(frontier.directions), "num_findings": i + 1, "frontier_saturation": 0.0}
+                    lse.record_run(f"iter_{i+1}", state, direction.topic)
+                    status.update(f"[green]{selection.selected_agent}[/] -> {direction.topic[:50]}")
+            trend = lse.improvement_trend()
+            summary = f"[dim]Frontier:[/] {frontier.summary()}"
+            if trend:
+                summary += f"  [dim]Trend:[/] {[f'{t:+.2f}' for t in trend]}"
+            console.print(summary)
+
+
 if __name__ == "__main__":
     cli()
