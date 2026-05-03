@@ -6,17 +6,16 @@ Multi-agent research platform combining **dapr-agents** (durable workflows, stat
 
 ```mermaid
 flowchart TB
-    O[ResearchWorkflow<br/>DurableAgent<br/>LSE + DaprFrontier]
+    O[ResearchWorkflow]
+    O -->|call_agent| E[Explorer]
+    O -->|call_agent| D[DeepReader]
+    O -->|call_agent| S[Synthesizer]
+    O -->|call_agent| C[Critic]
 
-    O -- call_agent --> E[Explorer Agent<br/>DSPy RLM]
-    O -- call_agent --> DR[DeepReader Agent<br/>DSPy RLM]
-    O -- call_agent --> S[Synthesizer Agent<br/>DSPy RLM]
-    O -- call_agent --> C[Critic Agent<br/>DSPy RLM]
-
-    E --> ST[Dapr State Store<br/>+ Pub/Sub<br/>(Redis)]
-    DR --> ST
-    S --> ST
-    C --> ST
+    E --> R[(Dapr State / Redis)]
+    D --> R
+    S --> R
+    C --> R
 ```
 
 Each agent is a `DurableAgent` subclass with:
