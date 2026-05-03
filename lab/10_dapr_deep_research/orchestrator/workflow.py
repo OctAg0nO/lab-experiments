@@ -17,8 +17,11 @@ from dapr_agents.storage.daprstores.stateservice import StateStoreService
 from dapr_agents.workflow import workflow_entry
 from dapr_agents.workflow.utils.core import call_agent
 
+import dspy
+
 from ..evolution.lse import LSEOptimizer
 from ..memory.dapr_frontier import DaprFrontier
+from ..agents.research_agents import SelectAgent
 
 
 class ResearchWorkflow(DurableAgent):
@@ -36,6 +39,8 @@ class ResearchWorkflow(DurableAgent):
         self.frontier = frontier
         self.lse = LSEOptimizer()
         self.all_findings: list[str] = []
+        self._agent_selector = dspy.ChainOfThought(SelectAgent)
+        self._evaluate = dspy.Evaluate(devset=[], metric=lambda ex, pred, trace=None: True, num_threads=4)
 
         super().__init__(
             name="ResearchWorkflow",
@@ -75,36 +80,31 @@ class ResearchWorkflow(DurableAgent):
 
             topic = direction.topic
 
-            # Dispatch agent based on frontier state
-            if direction.exploration_depth == 0:
-                result = yield call_agent(
-                    ctx, "explore",
-                    input={"topic": topic},
-                    app_id="explorer-agent",
-                )
+            # Select agent via DSPy ChainOfThought
+            selection = self._agent_selector(
+                exploration_depth=direction.exploration_depth,
+                confidence=direction.confidence,
+                topic=topic,
+            )
+            selected = selection.selected_agent if hasattr(selection, "selected_agent") else ""
+
+            if selected == "explorer" or direction.exploration_depth == 0:
+                result = yield call_agent(ctx, "explore", input={"topic": topic}, app_id="explorer-agent")
                 if result:
                     follow_ups = [d.get("topic", "") for d in result.get("directions", []) if d.get("topic")]
                     self.frontier.seed_from_directions(follow_ups, parent=topic)
                     self.frontier.absorb_findings(topic, 0.3, 1, follow_ups)
                     self.all_findings.append(json.dumps(result))
 
-            elif direction.confidence < 0.6:
-                result = yield call_agent(
-                    ctx, "deep_read",
-                    input={"topic": topic},
-                    app_id="deepreader-agent",
-                )
+            elif selected == "deepreader" or direction.confidence < 0.6:
+                result = yield call_agent(ctx, "deep_read", input={"topic": topic}, app_id="deepreader-agent")
                 if result:
                     n_findings = len(result.get("findings", []))
                     self.frontier.absorb_findings(topic, 0.2, n_findings, [])
                     self.all_findings.append(json.dumps(result))
 
             else:
-                result = yield call_agent(
-                    ctx, "synthesize",
-                    input={"topic": topic, "findings": self.all_findings[-3:]},
-                    app_id="synthesizer-agent",
-                )
+                result = yield call_agent(ctx, "synthesize", input={"topic": topic, "findings": self.all_findings[-3:]}, app_id="synthesizer-agent")
                 if result:
                     gaps = result.get("gaps", [])
                     self.frontier.seed_from_directions(gaps, parent=topic)

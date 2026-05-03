@@ -60,14 +60,11 @@ class DaprFrontier:
         self._load()
 
     def _load(self):
-        try:
-            raw = self._store.get_state(key=self._key)
-            if raw and raw.get("data"):
-                data = raw["data"]
-                self.directions = [ResearchDirection.from_dict(d) for d in data.get("directions", [])]
-                self._total_explorations = data.get("total_explorations", 0)
-        except Exception:
-            pass
+        raw = self._store.get_state(key=self._key)
+        if raw and raw.get("data"):
+            data = raw["data"]
+            self.directions = [ResearchDirection.from_dict(d) for d in data.get("directions", [])]
+            self._total_explorations = data.get("total_explorations", 0)
 
     def _save(self):
         self._store.save_state(key=self._key, value={

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 import dspy
+from dspy.adapters.baml_adapter import BAMLAdapter
 
 from .mcp.client import MCPClient
 from .mcp.bridge import MCPBridge
@@ -27,7 +28,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config" / "mcp_servers.json"
 
-dspy.configure(lm=dspy.LM("deepseek/deepseek-v4-flash"))
+dspy.configure(lm=dspy.LM("deepseek/deepseek-v4-flash"), adapter=BAMLAdapter())
 
 
 def _get_bridge() -> MCPBridge:

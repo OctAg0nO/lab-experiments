@@ -20,48 +20,53 @@ class ExtractPatterns(dspy.Signature):
 
 
 class SkillConsolidator:
-    """Uses DSPy ChainOfThought to extract patterns from trajectories.
+    """Uses DSPy ChainOfThought + Parallel to extract patterns from trajectories.
 
-    Can be optimized with BootstrapFewShot by providing labeled examples
-    of good vs poor trajectory extractions.
+    Trajectories are processed in parallel via dspy.Parallel, matching the
+    Trace2Skill paper's parallel multi-agent patch proposal (Stage 2).
+    Can be optimized with BootstrapFewShot by providing labeled examples.
     """
 
     def __init__(self, persist_dir: str | Path):
         self.dir = Path(persist_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self._extractor = dspy.ChainOfThought(ExtractPatterns)
+        self._parallel = dspy.Parallel(dspy.ChainOfThought(ExtractPatterns), n=4)
+
+    def _build_trajectory_text(self, traj: dict) -> str:
+        steps = traj if isinstance(traj, list) else traj.get("trajectory", [])
+        parts = []
+        for i, step in enumerate(steps[:8]):
+            parts.append(f"Step {i+1}:\nReasoning: {step.get('reasoning', '')[:300]}\nCode: {step.get('code', '')[:150]}\nOutput: {str(step.get('output', ''))[:200]}")
+        return "\n\n".join(parts)
 
     def consolidate(self, trajectories: list[dict]) -> dict:
         demos = []
         error_patterns = []
         success_patterns = []
 
-        for traj in trajectories:
-            steps = traj if isinstance(traj, list) else traj.get("trajectory", [])
-            context_parts = []
-            for i, step in enumerate(steps[:8]):
-                reasoning = step.get("reasoning", "")[:300]
-                output = str(step.get("output", ""))[:200]
-                code = step.get("code", "")[:150]
-                context_parts.append(f"Step {i+1}:\nReasoning: {reasoning}\nCode: {code}\nOutput: {output}")
+        texts = [self._build_trajectory_text(t) for t in trajectories]
+        texts = [t for t in texts if t.strip()]
 
-            trajectory_text = "\n\n".join(context_parts)
-            if not trajectory_text.strip():
+        if len(texts) >= 4:
+            predictions = self._parallel(trajectory_context=texts[:4])
+            if not isinstance(predictions, list):
+                predictions = [predictions]
+        else:
+            predictions = [self._extractor(trajectory_context=t) for t in texts]
+
+        for pred in predictions:
+            if pred is None:
                 continue
+            if hasattr(pred, "error_patterns") and pred.error_patterns and len(pred.error_patterns) > 10:
+                error_patterns.append({"symptom": pred.error_patterns[:300], "extracted_by": "dspy.Parallel"})
+            if hasattr(pred, "success_patterns") and pred.success_patterns and len(pred.success_patterns) > 10:
+                success_patterns.append({"pattern": pred.success_patterns[:300], "extracted_by": "dspy.Parallel"})
 
-            pred = self._extractor(trajectory_context=trajectory_text)
-
-            if pred.error_patterns and len(pred.error_patterns) > 10:
-                error_patterns.append({"symptom": pred.error_patterns[:300], "extracted_by": "dspy.CoT"})
-            if pred.success_patterns and len(pred.success_patterns) > 10:
-                success_patterns.append({"pattern": pred.success_patterns[:300], "extracted_by": "dspy.CoT"})
-
-            # Last step output as demonstration
+        for traj in trajectories[:5]:
+            steps = traj if isinstance(traj, list) else traj.get("trajectory", [])
             if steps and steps[-1].get("output"):
-                demos.append({
-                    "reasoning": steps[-1].get("reasoning", "")[:500],
-                    "improvement": pred.improvement_suggestion[:200],
-                })
+                demos.append({"reasoning": steps[-1].get("reasoning", "")[:500], "output": str(steps[-1].get("output", ""))[:200]})
 
         return {
             "error_patterns": error_patterns[:10],
