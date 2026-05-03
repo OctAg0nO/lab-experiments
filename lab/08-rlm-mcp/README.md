@@ -4,29 +4,26 @@ End-to-end DSPy pipeline: scrape → optimize → agent → consolidate memory.
 
 ## Pipeline
 
-```
-                         ┌──────────────────────────────────────┐
-                         │  1. Data Collection                  │
-  Crawl4AI MCP  ────────→│  Scrape URLs → chunk → label        │
-                         └──────────┬───────────────────────────┘
-                                    ↓ dataset
-                         ┌──────────────────────────────────────┐
-                         │  2. GFL Optimization (7 patterns)    │
-  DSPy program  ────────→│  BootstrapFewShot / MIPROv2 / GEPA   │
-                         │  Sequential / Ensemble / Distill     │
-                         │  BetterTogether                      │
-                         └──────────┬───────────────────────────┘
-                                    ↓ compiled program
-                         ┌──────────────────────────────────────┐
-                         │  3. RLM Agent                        │
-  MCP tools ─────────────│  Code-generating REPL → task result  │
-                         └──────────┬───────────────────────────┘
-                                    ↓ trajectory
-                         ┌──────────────────────────────────────┐
-                         │  4. Trace2Skill Consolidation        │
-                         │  attempts/  notes/  skills/          │
-                         │  (persists across runs)              │
-                         └──────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Collect["1. Data Collection"]
+        A1[Crawl4AI MCP] --> A2[Scrape URLs]
+        A2 --> A3[Chunk + Label]
+    end
+    subgraph Optimize["2. GFL Optimization (7 patterns)"]
+        B1[DSPy Program] --> B2[BootstrapFewShot / MIPROv2 / GEPA]
+        B2 --> B3[Sequential / Ensemble / Distill / BetterTogether]
+    end
+    subgraph Agent["3. RLM Agent"]
+        C1[MCP Tools] --> C2[Code-generating REPL]
+        C2 --> C3[Task Result]
+    end
+    subgraph Consolidate["4. Trace2Skill Consolidation"]
+        D1[Trajectory] --> D2[attempts/ notes/ skills/]
+    end
+    A3 -- dataset --> Optimize
+    B3 -- compiled program --> Agent
+    C3 -- trajectory --> Consolidate
 ```
 
 ## What it demonstrates
@@ -57,11 +54,16 @@ Optimizers are ranked by **improvement delta** over baseline, not just absolute 
 
 ### Memory Architecture (CORAL-style)
 
-```
-memory/
-├── attempts/     # Raw RLM execution traces (JSON)
-├── notes/        # Reflection notes per run (Markdown)
-└── skills/       # Reusable DSPy demonstrations (JSON)
+```mermaid
+flowchart LR
+    subgraph Memory["memory/"]
+        A[attempts/<br/>Raw execution traces]
+        N[notes/<br/>Reflection notes]
+        S[skills/<br/>Reusable DSPy demos]
+    end
+    RLM[RLM Trajectory] --> A
+    RLM --> N
+    RLM --> S
 ```
 
 On each run, the RLM trajectory is saved as an attempt, a reflection note captures the outcome, and successful reasoning steps are extracted as reusable few-shot demonstrations. Previous skills are loaded at startup.

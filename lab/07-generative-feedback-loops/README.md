@@ -4,6 +4,16 @@ Demonstrates DSPy's core optimization mechanism: the Generative Feedback Loop (G
 
 > *"No gradients are computed. The LLM generates its own training signal—by proposing demonstrations, instructions, or self-reflections—and the metric provides the selection pressure."*
 
+```mermaid
+flowchart LR
+    T[Trace Collection] --> F[Feedback Generation]
+    F --> U[Program Update]
+    U -- loop --> T
+    style T fill:#4a9eff
+    style F fill:#ff6b6b
+    style U fill:#51cf66
+```
+
 Covers:
 - **BootstrapFewShot** — trace collection → metric evaluation → demo retention
 - **GEPA** — reflective prompt mutation with Pareto-based selection (ICLR 2026 Oral)

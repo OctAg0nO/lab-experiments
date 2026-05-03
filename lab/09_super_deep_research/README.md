@@ -4,31 +4,39 @@ Multi-agent research platform with LSE meta-optimization, autonomous discovery, 
 
 ## Architecture
 
-```
-mcp_servers.json
-  ├── crawl4ai (SSE)     →  deep web scraping
-  ├── fetch (stdio)       →  URL fetching
-  ├── openrouter (stdio)  →  100+ models, ensemble reasoning, consensus
-  └── filesystem (stdio)  →  artifact persistence
-
-ResearchFrontier (UCB priority queue)
-  └── Orchestrator (LSE loop)
-        ├── Explorer      →  discovers directions (search tools)
-        ├── DeepReader    →  deep content analysis (fetch tools)
-        ├── Synthesizer   →  cross-source synthesis
-        ├── Critic        →  gap identification, quality evaluation
-        └── SkillAuthor   →  Trace2Skill parallel consolidation
-
-Memory:
-  ├── knowledge_graph.json   →  findings + typed relationships
-  ├── skills/                →  reusable DSPy demonstrations
-  ├── logs/                  →  execution trajectories
-  └── frontier.json          →  research state across runs
-
-Evolution:
-  ├── LSE          →  improvement-based reward trains orchestrator
-  ├── SelfDistill  →  hindsight distribution from execution feedback
-  └── Trace2Skill  →  parallel patch proposal + conflict-free merge
+```mermaid
+flowchart TB
+    subgraph MCP["MCP Servers (mcp_servers.json)"]
+        direction LR
+        M1[crawl4ai<br/>SSE] --> M2[fetch<br/>stdio] --> M3[openrouter<br/>stdio] --> M4[filesystem<br/>stdio]
+    end
+    subgraph Frontier["ResearchFrontier (UCB priority queue)"]
+        O[Orchestrator<br/>LSE Loop]
+    end
+    subgraph Agents["Research Agents"]
+        direction LR
+        A1[Explorer<br/>search tools]
+        A2[DeepReader<br/>fetch tools]
+        A3[Synthesizer<br/>cross-source]
+        A4[Critic<br/>gap analysis]
+        A5[SkillAuthor<br/>Trace2Skill]
+    end
+    subgraph Memory["Persistent Memory"]
+        direction LR
+        M5[knowledge_graph.json<br/>findings + relationships]
+        M6[skills/<br/>DSPy demos]
+        M7[logs/<br/>trajectories]
+        M8[frontier.json<br/>research state]
+    end
+    subgraph Evolution["Evolution Layer"]
+        E1[LSE<br/>improvement-based reward]
+        E2[SelfDistill<br/>hindsight distribution]
+        E3[Trace2Skill<br/>parallel patch proposal]
+    end
+    MCP --> Frontier
+    Frontier --> Agents
+    Agents --> Memory
+    Agents --> Evolution
 ```
 
 ## Prerequisites

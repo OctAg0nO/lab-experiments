@@ -4,23 +4,32 @@ Lab / showroom for AI agent experiments with **DSPy**, **MCP**, and **dapr-agent
 
 ## Lab Structure
 
-```
-lab/
-├── 01-basics/                     # Signatures, Predict, ChainOfThought
-├── 02-react-tools/                # ReAct agent loop with tools
-├── 03-rag-pipeline/               # RAG + BootstrapFewShot optimization
-├── 04-optimizers/                 # MIPROv2, GEPA, BetterTogether
-├── 05-rlm/                        # Recursive Language Model (REPL)
-├── 06-advanced/                   # Module.batch, Ensemble, Streaming, Async
-├── 07-generative-feedback-loops/  # GFL optimizers comparison
-├── 08-rlm-mcp/                    # RLM + MCP tools + BAMLAdapter
-├── 09_super_deep_research/        # Multi-agent research platform
-│                                  # (RLM agents + LSE + Knowledge Graph)
-├── 10_dapr_deep_research/         # Dapr-backed durable research
-│                                  # (DurableAgent + DSPy confidence deltas +
-│                                  #  MultiChainComparison + compile all)
-├── 99-sandbox/                    # Scratch space
-└── shared/                        # Shared config utilities
+```mermaid
+flowchart LR
+    subgraph Core["Core DSPy"]
+        direction TB
+        B1["01-basics<br/>Signatures, Predict, CoT"]
+        B2["02-react-tools<br/>ReAct agent loop"]
+        B3["03-rag-pipeline<br/>RAG + BootstrapFewShot"]
+        B4["04-optimizers<br/>GEPA, MIPROv2, BetterTogether"]
+        B5["05-rlm<br/>Recursive Language Model"]
+        B6["06-advanced<br/>Streaming, Async, Ensemble"]
+    end
+    subgraph Advanced["Advanced"]
+        direction TB
+        A1["07-gfl<br/>Generative Feedback Loops"]
+        A2["08-rlm-mcp<br/>RLM + MCP + BAMLAdapter"]
+    end
+    subgraph Platform["Research Platforms"]
+        direction TB
+        P1["09_super_deep_research<br/>Multi-agent + LSE + KG"]
+        P2["10_dapr_deep_research<br/>DurableAgent + DSPy deltas"]
+    end
+    subgraph Util["Utilities"]
+        S1["99-sandbox<br/>Scratch space"]
+        S2["shared<br/>Env & config helpers"]
+    end
+    Core --> Advanced --> Platform
 ```
 
 ## Quick Start
