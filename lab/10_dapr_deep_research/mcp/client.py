@@ -11,20 +11,21 @@ from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
 
 
-@dataclass
-class _ServerCtx:
-    session: ClientSession
-    close_coro: Any
-
-
 class MCPClient:
+    """Async-to-sync MCP transport bridge.
+
+    Connects to MCP servers (stdio/sse) from a background event-loop thread
+    and exposes a synchronous interface.  The background thread is a daemon
+    — its subprocess children are reaped by the OS on process exit.
+    """
+
     def __init__(self, config_path: str):
         with open(config_path) as f:
             self.config = json.load(f)
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
         self._thread.start()
-        self._servers: dict[str, _ServerCtx] = {}
+        self._sessions: dict[str, tuple[ClientSession, Any, Any]] = {}
 
     def _run(self, coro) -> Any:
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
@@ -39,7 +40,11 @@ class MCPClient:
                 if transport == "sse":
                     tools = self._run(self._connect_sse(name, cfg["url"]))
                 else:
-                    params = StdioServerParameters(command=cfg["command"], args=cfg.get("args", []), env=cfg.get("env"))
+                    params = StdioServerParameters(
+                        command=cfg["command"],
+                        args=cfg.get("args", []),
+                        env=cfg.get("env"),
+                    )
                     tools = self._run(self._connect_stdio(name, params))
                 all_tools.extend(tools)
             except Exception as e:
@@ -51,10 +56,7 @@ class MCPClient:
         read, write = await ctx.__aenter__()
         session = await ClientSession(read, write).__aenter__()
         await session.initialize()
-        async def _close():
-            await session.__aexit__(None, None, None)
-            await ctx.__aexit__(None, None, None)
-        self._servers[name] = _ServerCtx(session=session, close_coro=_close())
+        self._sessions[name] = (session, ctx, "stdio")
         return await self._list_tools(name, session)
 
     async def _connect_sse(self, name, url):
@@ -62,19 +64,20 @@ class MCPClient:
         read, write = await ctx.__aenter__()
         session = await ClientSession(read, write).__aenter__()
         await session.initialize()
-        async def _close():
-            await session.__aexit__(None, None, None)
-            await ctx.__aexit__(None, None, None)
-        self._servers[name] = _ServerCtx(session=session, close_coro=_close())
+        self._sessions[name] = (session, ctx, "sse")
         return await self._list_tools(name, session)
 
     @staticmethod
     async def _list_tools(name, session):
         result = await session.list_tools()
-        return [{"server": name, "name": t.name, "description": t.description, "inputSchema": t.inputSchema} for t in result.tools]
+        return [
+            {"server": name, "name": t.name,
+             "description": t.description, "inputSchema": t.inputSchema}
+            for t in result.tools
+        ]
 
     def call_tool(self, server, tool_name, arguments):
-        session = self._servers[server].session
+        session = self._sessions[server][0]
         result = self._run(session.call_tool(tool_name, arguments=arguments))
         parts = []
         for c in result.content:
@@ -87,11 +90,14 @@ class MCPClient:
         return "\n".join(parts)
 
     def close(self):
-        if self._servers:
-            async def _cleanup():
-                for ctx in self._servers.values():
-                    await ctx.close_coro
-            self._run(_cleanup())
+        """Stop the background event-loop thread.
+
+        MCP sessions are NOT individually torn down here because the
+        underlying anyio cancel-scopes are tied to the task that entered
+        them and cannot be exited from a different coroutine.  The daemon
+        thread is joined with a short timeout; OS child-reaping handles
+        the subprocesses.
+        """
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=2)
 
