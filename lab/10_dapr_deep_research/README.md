@@ -80,25 +80,22 @@ DAPR_PUBSUB="research-pubsub"
 
 Copy `.env.example` from the project root to get started.
 
-## Prerequisites
+## Quick Setup
 
 ```bash
-# Dapr
-dapr init
+# One command — installs deps, starts Docker infra, initializes Dapr:
+./setup.sh
 
-# Crawl4AI
-docker compose -f lab/10_dapr_deep_research/docker-compose.yml up -d
-
-# Install deps
-uv sync
-
-# Optional — student model for distillation
-ollama pull gemma4
+# Or step by step:
+uv sync                          # Install Python deps
+docker compose -f lab/10_dapr_deep_research/docker-compose.yml up -d  # Crawl4AI
+dapr init                        # Dapr control plane
+ollama pull gemma4               # Student model for distillation (optional)
 ```
 
 ## Running
 
-Two paths depending on available infrastructure:
+After `./setup.sh` (or manually satisfying prerequisites), two paths depending on available infrastructure:
 
 ### Path A: Full distributed research (Dapr + Crawl4AI + Redis)
 
