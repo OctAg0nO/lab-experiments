@@ -113,39 +113,71 @@ This starts the `ResearchWorkflow` orchestrator (port 8000) which:
 5. Checkpoints progress to Redis every 3 iterations — survives crashes
 6. Tracks LSE improvement trend across iterations
 
-### Path B: Quick test (no infrastructure needed)
+### Path B: No-infrastructure commands (no Dapr, no Docker needed)
+
+The `_NoopStore` and `InMemoryFrontier` classes allow all agents to run
+without the Dapr sidecar. Agents use direct `dspy.LM` calls instead of
+`DaprChatClient`.
 
 ```bash
-# Single-process UCB frontier demo (no Dapr, no Crawl4AI)
-uv run python -m lab.10_dapr_deep_research --mode run
+# Agent selection demo with Rich table output
+uv run python -m lab.10_dapr_deep_research --query "Transformers" run
+
+# Full pipeline: MCP scrape → GFL compile → LSE research loop
+uv run python -m lab.10_dapr_deep_research --query "DSPy optimization" --iterations 10 mission
 
 # Teacher/student distillation (requires Ollama + gemma4)
-uv run python -m lab.10_dapr_deep_research --mode distill
-```
+uv run python -m lab.10_dapr_deep_research distill
 
-The `--mode run` command exercises the UCB frontier loop in memory.
-The `--mode distill` compiles every DSPy program using teacher (DeepSeek) → student (Gemma 4).
+# Help for any command
+uv run python -m lab.10_dapr_deep_research mission --help
+```
 
 ## CLI Reference
 
-```text
-usage: uv run python -m lab.10_dapr_deep_research [-h]
-       [--mode {orchestrator,explorer,deepreader,synthesizer,critic,run,distill}]
+The CLI uses [Click](https://click.palletsprojects.com/) with subcommands
+and [Rich](https://rich.readthedocs.io/) for terminal output.
 
-modes:
+```text
+Usage: uv run python -m lab.10_dapr_deep_research [OPTIONS] COMMAND [ARGS]...
+
+Global options:
+  -q, --query TEXT          Research topic or question
+  -i, --iterations INTEGER  Max research iterations  [default: 5]
+
+Commands:
   orchestrator  Start ResearchWorkflow on port 8000 (requires Dapr sidecar)
-  explorer      Start ExplorerAgent on port 8001 (requires Dapr sidecar)
-  deepreader    Start DeepReaderAgent on port 8002 (requires Dapr sidecar)
-  synthesizer   Start SynthesizerAgent on port 8003 (requires Dapr sidecar)
-  critic        Start CriticAgent on port 8004 (requires Dapr sidecar)
-  run           UCB frontier loop demo (no infrastructure needed)
+  explorer      Start ExplorerAgent on port 8001 (Dapr + Crawl4AI)
+  deepreader    Start DeepReaderAgent on port 8002 (Dapr + Crawl4AI)
+  synthesizer   Start SynthesizerAgent on port 8003 (Dapr sidecar)
+  critic        Start CriticAgent on port 8004 (Dapr sidecar)
+  run           Agent selection demo (no infrastructure)
+  mission       Full pipeline: MCP → GFL → LSE (no infrastructure)
   distill       Teacher→Student compilation for all DSPy programs
+```
+
+### CLI examples
+
+```bash
+# Global options go BEFORE the subcommand:
+uv run python -m lab.10_dapr_deep_research --query "topic" --iterations 8 run
+
+# Start a Dapr-wrapped agent server:
+dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 \
+    --resources-path lab/10_dapr_deep_research/resources -- \
+    uv run python -m lab.10_dapr_deep_research explorer
+
+# Multi-app Dapr launch (all 5 agents):
+dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
 ```
 
 ## Key Features
 
 - **Durable workflows**: Research survives process crashes — Dapr Workflows checkpoint after each iteration
 - **Stateful frontier**: `DaprFrontier` uses Redis-backed state store, not JSON files
+- **No-infrastructure mode**: `InMemoryFrontier` + `_NoopStore` let all agents run without Dapr for development
+- **Click CLI**: Command-based interface with `--query` and `--iterations` global options
+- **Rich output**: Tables and panels for research loop results and mission summaries
 - **Multi-agent dispatch**: `call_agent()` for cross-agent workflow orchestration
 - **DSPy-driven confidence**: Hardcoded confidence deltas (0.3, 0.2, 0.15) replaced with `ComputeConfidenceDelta` signature — delta adapts to finding quality
 - **DSPy-driven saturation**: Static 0.95 threshold replaced with `AssessDirectionSaturation` — per-direction assessment
