@@ -36,11 +36,7 @@ class ResearchWorkflow(DurableAgent):
     def __init__(self, bridge: MCPBridge, frontier: DaprFrontier, **kwargs):
         self.bridge = bridge
         self.frontier = frontier
-        self.lse = LSEOptimizer(quality_fn=lambda s: (
-            min(1.0, s.get("num_directions", 0) / 10.0) * 0.4 +
-            min(1.0, s.get("num_findings", 0) / max(1, s.get("num_directions", 1)) / 3.0) * 0.4 +
-            s.get("frontier_saturation", 0.0) * 0.2
-        ))
+        self.lse = LSEOptimizer()
         self.all_findings: list[str] = []
         self.all_trajectories: list[dict] = []
 
