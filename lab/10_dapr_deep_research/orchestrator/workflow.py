@@ -19,7 +19,6 @@ from dapr_agents.workflow.utils.core import call_agent
 
 from ..evolution.lse import LSEOptimizer
 from ..memory.dapr_frontier import DaprFrontier
-from ..mcp.bridge import MCPBridge
 
 
 class ResearchWorkflow(DurableAgent):
@@ -33,12 +32,10 @@ class ResearchWorkflow(DurableAgent):
     5. Checkpoints state after each iteration
     """
 
-    def __init__(self, bridge: MCPBridge, frontier: DaprFrontier, **kwargs):
-        self.bridge = bridge
+    def __init__(self, frontier: DaprFrontier, **kwargs):
         self.frontier = frontier
         self.lse = LSEOptimizer()
         self.all_findings: list[str] = []
-        self.all_trajectories: list[dict] = []
 
         super().__init__(
             name="ResearchWorkflow",

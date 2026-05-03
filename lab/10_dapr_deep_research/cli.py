@@ -37,10 +37,9 @@ def _get_bridge() -> MCPBridge:
 
 
 def cmd_orchestrator():
-    bridge = _get_bridge()
     frontier = DaprFrontier()
     print(f"Frontier: {frontier.summary()}")
-    agent = ResearchWorkflow(bridge=bridge, frontier=frontier)
+    agent = ResearchWorkflow(frontier=frontier)
     from dapr_agents import AgentRunner
     runner = AgentRunner()
     runner.serve(agent, port=8000)
