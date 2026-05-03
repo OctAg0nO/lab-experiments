@@ -9,7 +9,18 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import dspy
 from dapr_agents.storage.daprstores.stateservice import StateStoreService
+
+
+class AssessDirectionSaturation(dspy.Signature):
+    """Determine if a research direction is saturated."""
+    topic: str = dspy.InputField()
+    confidence: float = dspy.InputField()
+    exploration_depth: int = dspy.InputField()
+    source_count: int = dspy.InputField()
+    is_saturated: bool = dspy.OutputField(desc="Whether saturated")
+    reasoning: str = dspy.OutputField(desc="Why")
 
 
 @dataclass
@@ -56,6 +67,7 @@ class DaprFrontier:
         self._key = key
         self.directions: list[ResearchDirection] = []
         self._total_explorations = 0
+        self._saturation = dspy.ChainOfThought(AssessDirectionSaturation)
         self._load()
 
     def _load(self):
@@ -93,10 +105,14 @@ class DaprFrontier:
         self._save()
 
     def next_action(self) -> ResearchDirection | None:
-        active = [d for d in self.directions if d.confidence < 0.95]
-        if not active:
+        candidates = []
+        for d in self.directions:
+            pred = self._saturation(topic=d.topic, confidence=d.confidence, exploration_depth=d.exploration_depth, source_count=d.source_count)
+            if not hasattr(pred, "is_saturated") or not pred.is_saturated:
+                candidates.append(d)
+        if not candidates:
             return None
-        return max(active, key=lambda d: d.ucb_score(self._total_explorations))
+        return max(candidates, key=lambda d: d.ucb_score(self._total_explorations))
 
     def absorb_findings(self, topic: str, confidence_delta: float, sources: int, follow_ups: list[str]):
         for d in self.directions:
@@ -117,9 +133,14 @@ class DaprFrontier:
         self._save()
 
     def saturated(self) -> bool:
-        return len([d for d in self.directions if d.confidence < 0.95]) == 0
+        unsat = []
+        for d in self.directions:
+            pred = self._saturation(topic=d.topic, confidence=d.confidence, exploration_depth=d.exploration_depth, source_count=d.source_count)
+            if not hasattr(pred, "is_saturated") or not pred.is_saturated:
+                unsat.append(d)
+        return len(unsat) == 0
 
     def summary(self) -> str:
-        active = [d for d in self.directions if d.confidence < 0.95]
-        explored = [d for d in self.directions if d.confidence >= 0.95]
+        explored = [d for d in self.directions if d.confidence >= 0.9]
+        active = [d for d in self.directions if d not in explored]
         return f"{len(active)} active, {len(explored)} explored, {self._total_explorations} total explorations"

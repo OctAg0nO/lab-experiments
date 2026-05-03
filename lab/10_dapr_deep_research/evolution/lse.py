@@ -42,6 +42,13 @@ class LSEOptimizer:
         self.runs: list[LSERun] = []
         self._evaluator = dspy.ChainOfThought(QualityEvaluation)
 
+    def compile(self, trainset: list[dspy.Example]):
+        bs = dspy.BootstrapFewShot(
+            metric=lambda _ex, pred, _trace: hasattr(pred, "quality_score") and 0.0 <= pred.quality_score <= 1.0,
+            max_bootstrapped_demos=4, max_labeled_demos=2,
+        )
+        self._evaluator = bs.compile(self._evaluator, trainset=trainset)
+
     def compute_improvement(self, current_quality: float) -> float:
         if not self.runs:
             return 0.0

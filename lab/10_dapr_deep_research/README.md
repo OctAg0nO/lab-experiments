@@ -21,12 +21,12 @@ flowchart TB
 Each agent is a `DurableAgent` subclass with a full DSPy pipeline inside:
 
 | Agent | DSPy Modules |
-|---|---|---|
-| Explorer | `dspy.RLM` (discovery) + `dspy.ChainOfThought` (hypothesis gen) + `dspy.Parallel` (batch) + `BootstrapFewShot` (compile) |
-| DeepReader | `dspy.RLM` (content extraction) + `dspy.ChainOfThought` (cross-validation) |
-| Synthesizer | `dspy.RLM` (synthesis) + `dspy.ChainOfThought(SynthesizeAcrossSources)` |
-| Critic | `dspy.RLM` (2-pass) + `dspy.Refine` (iterative improvement, feeds back into second RLM pass) |
-| Orchestrator | `dspy.ChainOfThought(SelectAgent)` (CoT-based agent dispatch) |
+|---|---|
+| Explorer | `dspy.RLM` (discovery) + `dspy.ChainOfThought` (hypothesis gen) + `dspy.BestOfN` (top-k) + `BootstrapFewShot` (compile) |
+| DeepReader | `dspy.RLM` (content extraction) + `dspy.ChainOfThought` (cross-validation) + `BootstrapFewShot` (compile) |
+| Synthesizer | `dspy.RLM` (synthesis) + `dspy.ChainOfThought(SynthesizeAcrossSources)` + `BootstrapFewShot` (compile) |
+| Critic | `dspy.RLM` (2-pass) + `dspy.Refine` (iterative improvement) + `dspy.MultiChainComparison` (3-chain compare) + `BootstrapFewShot` (compile) |
+| Orchestrator | `dspy.ChainOfThought(SelectAgent)` + `dspy.ChainOfThought(ComputeConfidenceDelta)` + `BootstrapFewShot` (compile) |
 
 All agents wrapped in `@workflow_entry` for durable execution with `DaprChatClient`,
 `StateStoreService`, and automatic retry.
@@ -35,13 +35,15 @@ All agents wrapped in `@workflow_entry` for durable execution with `DaprChatClie
 
 | Component | DSPy Implementation | Dapr Role |
 |-----------|-------------------|-----------|
-| Quality eval | `dspy.ChainOfThought(QualityEvaluation)` | State persisted in Redis |
-| Pattern extraction | `dspy.ChainOfThought(ExtractPatterns)` | State persisted in Redis |
+| Quality eval | `dspy.ChainOfThought(QualityEvaluation)` + `BootstrapFewShot` (compile) | State persisted in Redis |
+| Pattern extraction | `dspy.ChainOfThought(ExtractPatterns)` + `BootstrapFewShot` (compile) | State persisted in Redis |
 | Agent dispatch | `dspy.ChainOfThought(SelectAgent)` | `call_agent()` cross-app invocation |
-| Agent reasoning | `dspy.RLM` + `dspy.CoT` + `dspy.Parallel` + `dspy.Refine` | `DurableAgent` shell + `@workflow_entry` |
-| Agent optimization | `BootstrapFewShot.compile()` on Explorer | `DaprFrontier` persistent state |
+| Agent reasoning | `dspy.RLM` + `dspy.CoT` + `dspy.BestOfN` + `dspy.Refine` + `dspy.MultiChainComparison` | `DurableAgent` shell + `@workflow_entry` |
+| Agent optimization | `BootstrapFewShot.compile()` on all agents | `DaprFrontier` persistent state |
 | Structured output | `BAMLAdapter` for Pydantic models | — |
-| Frontier | `ResearchDirection.ucb_score` (pure math) | `DaprFrontier` via `StateStoreService` |
+| Confidence deltas | `dspy.ChainOfThought(ComputeConfidenceDelta)` per agent result | — |
+| Saturation | `dspy.ChainOfThought(AssessDirectionSaturation)` per direction | — |
+| Frontier | `ResearchDirection.ucb_score` (pure math) + DSPy saturation check | `DaprFrontier` via `StateStoreService` |
 | Metrics | `dspy.Evaluate` | Workflow step checkpointing |
 
 ## References
@@ -95,8 +97,10 @@ python -m lab.10_dapr_deep_research --mode run
 - **Durable workflows**: Research survives process crashes — Dapr Workflows checkpoint after each iteration
 - **Stateful frontier**: `DaprFrontier` uses Redis-backed state store, not JSON files
 - **Multi-agent dispatch**: `call_agent()` for cross-agent workflow orchestration
-- **DSPy optimization**: Full GFL pipeline runs inside workflow steps
+- **DSPy-driven confidence**: Hardcoded confidence deltas (0.3, 0.2, 0.15) replaced with `ComputeConfidenceDelta` signature — delta adapts to finding quality
+- **DSPy-driven saturation**: Static 0.95 threshold replaced with `AssessDirectionSaturation` — per-direction assessment
+- **MultiChainComparison**: CriticAgent compares 3 critique chains via `dspy.MultiChainComparison` before refinement
+- **Universal compilation**: Every DSPy program (`DeepReader`, `Synthesizer`, `Critic`, `LSE`, `Trace2Skill`, `Orchestrator`) has a `compile()` method ready for `BootstrapFewShot`
 - **LSE meta-optimization**: Improvement-based reward trains the orchestrator across runs
 - **Pub/sub coordination**: `research-pubsub` topic for agent broadcasts
 - **Parallel tool execution**: `ToolExecutionMode.PARALLEL` for MCP tool calls
-- **Hot-reload config**: `RuntimeSubscriptionConfig` for live agent persona changes

@@ -11,13 +11,14 @@ lab/
 ├── 03-rag-pipeline/               # RAG + BootstrapFewShot optimization
 ├── 04-optimizers/                 # MIPROv2, GEPA, BetterTogether
 ├── 05-rlm/                        # Recursive Language Model (REPL)
-├── 06-advanced/                   # MultiChainComparison, Streaming, Async
+├── 06-advanced/                   # Module.batch, Ensemble, Streaming, Async
 ├── 07-generative-feedback-loops/  # GFL optimizers comparison
 ├── 08-rlm-mcp/                    # RLM + MCP tools + BAMLAdapter
 ├── 09_super_deep_research/        # Multi-agent research platform
 │                                  # (RLM agents + LSE + Knowledge Graph)
 ├── 10_dapr_deep_research/         # Dapr-backed durable research
-│                                  # (DurableAgent + StateStore + Pub/Sub)
+│                                  # (DurableAgent + DSPy confidence deltas +
+│                                  #  MultiChainComparison + compile all)
 ├── 99-sandbox/                    # Scratch space
 └── shared/                        # Shared config utilities
 ```

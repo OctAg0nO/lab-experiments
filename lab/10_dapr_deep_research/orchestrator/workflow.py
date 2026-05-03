@@ -21,7 +21,7 @@ import dspy
 
 from ..evolution.lse import LSEOptimizer
 from ..memory.dapr_frontier import DaprFrontier
-from ..agents.research_agents import SelectAgent
+from ..agents.research_agents import SelectAgent, ComputeConfidenceDelta
 
 
 class ResearchWorkflow(DurableAgent):
@@ -40,6 +40,7 @@ class ResearchWorkflow(DurableAgent):
         self.lse = LSEOptimizer()
         self.all_findings: list[str] = []
         self._agent_selector = dspy.ChainOfThought(SelectAgent)
+        self._conf_delta = dspy.ChainOfThought(ComputeConfidenceDelta)
         self._evaluate = dspy.Evaluate(devset=[], metric=lambda ex, pred, trace=None: True, num_threads=4)
 
         super().__init__(
@@ -58,6 +59,13 @@ class ResearchWorkflow(DurableAgent):
             ),
             **kwargs,
         )
+
+    def compile(self, trainset: list[dspy.Example]):
+        bs = dspy.BootstrapFewShot(
+            metric=lambda _ex, pred, _trace: hasattr(pred, "selected_agent") and pred.selected_agent in ("explorer", "deepreader", "synthesizer"),
+            max_bootstrapped_demos=4, max_labeled_demos=2,
+        )
+        self._agent_selector = bs.compile(self._agent_selector, trainset=trainset)
 
     @workflow_entry
     def run_research(self, ctx, input: dict):
@@ -91,14 +99,17 @@ class ResearchWorkflow(DurableAgent):
                 if result:
                     follow_ups = [d.get("topic", "") for d in result.get("directions", []) if d.get("topic")]
                     self.frontier.seed_from_directions(follow_ups, parent=topic)
-                    self.frontier.absorb_findings(topic, 0.3, 1, follow_ups)
+                    delta = self._conf_delta(topic=topic, agent_type="explorer", num_findings=len(follow_ups), findings_summary=str(follow_ups[:3]), exploration_depth=direction.exploration_depth)
+                    self.frontier.absorb_findings(topic, max(0.0, min(0.5, delta.confidence_delta)), 1, follow_ups)
                     self.all_findings.append(json.dumps(result))
 
-            elif selected == "deepreader" or direction.confidence < 0.6:
+            elif selected == "deepreader" or direction.exploration_depth == 0:
                 result = yield call_agent(ctx, "deep_read", input={"topic": topic}, app_id="deepreader-agent")
                 if result:
                     n_findings = len(result.get("findings", []))
-                    self.frontier.absorb_findings(topic, 0.2, n_findings, [])
+                    findings_text = "; ".join(f.get("claim", "")[:100] for f in result.get("findings", [])[:3])
+                    delta = self._conf_delta(topic=topic, agent_type="deepreader", num_findings=n_findings, findings_summary=findings_text, exploration_depth=direction.exploration_depth)
+                    self.frontier.absorb_findings(topic, max(0.0, min(0.5, delta.confidence_delta)), n_findings, [])
                     self.all_findings.append(json.dumps(result))
 
             else:
@@ -106,7 +117,8 @@ class ResearchWorkflow(DurableAgent):
                 if result:
                     gaps = result.get("gaps", [])
                     self.frontier.seed_from_directions(gaps, parent=topic)
-                    self.frontier.absorb_findings(topic, 0.15, 0, gaps)
+                    delta = self._conf_delta(topic=topic, agent_type="synthesizer", num_findings=len(gaps), findings_summary=str(gaps[:3]), exploration_depth=direction.exploration_depth)
+                    self.frontier.absorb_findings(topic, max(0.0, min(0.5, delta.confidence_delta)), 0, gaps)
 
             if iteration % 3 == 0:
                 yield ctx.set_state("heartbeat_frontier", self.frontier.summary())

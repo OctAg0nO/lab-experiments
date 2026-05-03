@@ -79,6 +79,30 @@ class SelectAgent(dspy.Signature):
     topic: str = dspy.InputField()
     selected_agent: str = dspy.OutputField(desc="explorer, deepreader, or synthesizer")
 
+class ComputeConfidenceDelta(dspy.Signature):
+    """Determine confidence increase from research findings."""
+    topic: str = dspy.InputField()
+    agent_type: str = dspy.InputField(desc="explorer, deepreader, or synthesizer")
+    num_findings: int = dspy.InputField(desc="Number of findings collected")
+    findings_summary: str = dspy.InputField(desc="Key findings summary")
+    exploration_depth: int = dspy.InputField(desc="Times explored")
+    confidence_delta: float = dspy.OutputField(desc="Confidence increase 0.0–0.5")
+    reasoning: str = dspy.OutputField(desc="Why this delta")
+
+class AssessSaturation(dspy.Signature):
+    """Assess whether continued exploration of a direction is still valuable."""
+    topic: str = dspy.InputField()
+    confidence: float = dspy.InputField()
+    exploration_depth: int = dspy.InputField()
+    source_count: int = dspy.InputField()
+    is_saturated: bool = dspy.OutputField(desc="Whether saturated")
+    reasoning: str = dspy.OutputField(desc="Why")
+
+class CritiqueReasoning(dspy.Signature):
+    """Critique research findings and identify gaps."""
+    research_summary: str = dspy.InputField()
+    critique: str = dspy.OutputField(desc="Critical analysis")
+
 # ---------------------------------------------------------------------------
 # RLM factory
 # ---------------------------------------------------------------------------
@@ -149,6 +173,10 @@ class DeepReaderAgent(DurableAgent):
             **kwargs,
         )
 
+    def compile(self, trainset: list[dspy.Example]):
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "validated_claims") and len(pred.validated_claims) > 0, max_bootstrapped_demos=4, max_labeled_demos=2)
+        self._cross_validator = bs.compile(self._cross_validator, trainset=trainset)
+
     @workflow_entry
     def deep_read(self, ctx, input: dict) -> dict:
         url = input.get("url") or input["topic"]
@@ -186,6 +214,10 @@ class SynthesizerAgent(DurableAgent):
             **kwargs,
         )
 
+    def compile(self, trainset: list[dspy.Example]):
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "synthesis") and len(pred.synthesis) > 50, max_bootstrapped_demos=4, max_labeled_demos=2)
+        self._synthesizer = bs.compile(self._synthesizer, trainset=trainset)
+
     @workflow_entry
     def synthesize(self, ctx, input: dict) -> dict:
         result = self._rlm(task=f"Synthesize: {input['topic']}")
@@ -209,6 +241,7 @@ class CriticAgent(DurableAgent):
     def __init__(self, **kwargs):
         self._rlm = _rlm_factory("research_summary: str -> result: Critique", max_iter=6, max_calls=8)
         self._refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"), N=3, reward_fn=lambda _, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
+        self._comparison = dspy.MultiChainComparison(CritiqueReasoning, n=3)
         self._rlm_second = _rlm_factory("research_summary: str, refinement_guidance: str -> result: Critique", max_iter=4, max_calls=6)
         super().__init__(
             name="CriticAgent", role="Research Critic",
@@ -220,13 +253,20 @@ class CriticAgent(DurableAgent):
             **kwargs,
         )
 
+    def compile(self, trainset: list[dspy.Example]):
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "improved_critique") and len(pred.improved_critique) > 100, max_bootstrapped_demos=4, max_labeled_demos=2)
+        self._refine = bs.compile(self._refine, trainset=trainset)
+
     @workflow_entry
     def critique(self, ctx, input: dict) -> dict:
         summary = input.get("summary", "")
         first_pass = self._rlm(research_summary=summary)
         r = first_pass.result if hasattr(first_pass, "result") and first_pass.result else None
-        refined = self._refine(research_summary=summary, critique=str(r.follow_ups if r else [])) if r and hasattr(r, "follow_ups") else None
-        guidance = refined.improved_critique if refined and hasattr(refined, "improved_critique") else ""
+        comparison = self._comparison(research_summary=summary) if r else None
+        comparison_critique = comparison.critique if comparison and hasattr(comparison, "critique") else ""
+        refine_input = comparison_critique or str(r.follow_ups if r else [])
+        refined = self._refine(research_summary=summary, critique=refine_input) if (r or comparison) and refine_input else None
+        guidance = refined.improved_critique if refined and hasattr(refined, "improved_critique") else comparison_critique
         second_pass = self._rlm_second(research_summary=summary, refinement_guidance=guidance) if guidance else first_pass
         r2 = second_pass.result if hasattr(second_pass, "result") and second_pass.result else r
         ctx.set_state("critique_result", {
