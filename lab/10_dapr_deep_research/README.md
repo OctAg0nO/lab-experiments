@@ -42,8 +42,9 @@ All agents wrapped in `@workflow_entry` for durable execution with `DaprChatClie
 | Agent optimization | `BootstrapFewShot.compile()` on all agents | `DaprFrontier` persistent state |
 | Structured output | `BAMLAdapter` for Pydantic models | — |
 | Confidence deltas | `dspy.ChainOfThought(ComputeConfidenceDelta)` per agent result | — |
-| Saturation | `dspy.ChainOfThought(AssessDirectionSaturation)` per direction | — |
-| Frontier | `ResearchDirection.ucb_score` (pure math) + DSPy saturation check | `DaprFrontier` via `StateStoreService` |
+| Saturation | `dspy.ChainOfThought(AssessBatchSaturation)` — single batch call | — |
+| Frontier | `ResearchDirection.ucb_score` (pure math) + `AssessBatchSaturation` | `DaprFrontier` via `StateStoreService` |
+| No-infra state | `NoopStore` (in-memory `StateStoreService` subclass) | — |
 | Metrics | `dspy.Evaluate` | Workflow step checkpointing |
 
 ## References
@@ -176,7 +177,10 @@ dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
 
 - **Durable workflows**: Research survives process crashes — Dapr Workflows checkpoint after each iteration
 - **Stateful frontier**: `DaprFrontier` uses Redis-backed state store, not JSON files
-- **No-infrastructure mode**: `InMemoryFrontier` + `_NoopStore` let all agents run without Dapr for development
+- **No-infrastructure mode**: `InMemoryFrontier` + `NoopStore` let all agents run without Dapr for development
+- **Batch saturation**: `AssessBatchSaturation` replaces N+1 per-direction LLM calls with a single batch call
+- **Factory pattern**: `_create_agents()` eliminates repeated agent construction across all commands
+- **Cached frontier counts**: `_active_count` tracks active/explored in O(1) instead of O(n) per summary
 - **Click CLI**: Command-based interface with `--query` and `--iterations` global options
 - **Rich output**: Tables and panels for research loop results and mission summaries
 - **Multi-agent dispatch**: `call_agent()` for cross-agent workflow orchestration

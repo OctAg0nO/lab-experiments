@@ -95,7 +95,7 @@ Used across labs 08-10 for structured RLM output:
 | `CritiqueReasoning` | research_summary | critique | 10/agents/research_agents.py |
 | `QualityEvaluation` | num_directions, num_findings, frontier_saturation | quality_score, explanation | 10/evolution/lse.py |
 | `ExtractPatterns` | trajectory_context | error_patterns, success_patterns, improvement_suggestion | 10/evolution/trace2skill.py |
-| `AssessDirectionSaturation` | topic, confidence, exploration_depth, source_count | is_saturated, reasoning | 10/memory/dapr_frontier.py |
+| `AssessBatchSaturation` | directions_json: str | saturated_indices: list[int] | 10/memory/dapr_frontier.py |
 | `ClassifyContent` | chunk | category, key_topics | 08/main.py |
 | `ClassifyIntent` | query | intent, confidence | 07/main.py |
 | `QualityEvaluation` | — | — | 07/main.py |
