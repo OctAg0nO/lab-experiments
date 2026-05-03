@@ -1,0 +1,12 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: llm-provider
+spec:
+  type: conversation.openai
+  version: v1
+  metadata:
+    - name: endpoint
+      value: "https://api.deepseek.com/v1"
+    - name: model
+      value: "deepseek-v4-flash"

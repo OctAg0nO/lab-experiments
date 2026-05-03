@@ -5,6 +5,7 @@ description = "DSPy lab / showroom"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "dapr-agents>=1.0.2",
     "dspy-ai>=3.2.0",
     "mcp>=1.27.0",
     "python-dotenv>=1.0.0",
