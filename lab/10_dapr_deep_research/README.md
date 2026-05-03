@@ -59,24 +59,27 @@ uv sync
 
 ## Running
 
-### Multi-app run (all agents):
+### Multi-app run (all 5 agents at once, from project root):
 
 ```bash
-cd lab/10_dapr_deep_research
-dapr run -f dapr-multi-app-run.yaml
+dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
 ```
 
-### Individual agents (separate terminals):
+Launches orchestrator (8000), explorer (8001), deepreader (8002), synthesizer (8003), critic (8004) with shared Redis state store and pub/sub.
+
+### Individual agents (separate terminals, from project root):
 
 ```bash
-dapr run --app-id orchestrator --app-protocol grpc --app-port 8000 --resources-path ./resources -- \
+dapr run --app-id orchestrator --app-protocol grpc --app-port 8000 \
+    --resources-path lab/10_dapr_deep_research/resources -- \
     python -m lab.10_dapr_deep_research --mode orchestrator
 
-dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 --resources-path ./resources -- \
+dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 \
+    --resources-path lab/10_dapr_deep_research/resources -- \
     python -m lab.10_dapr_deep_research --mode explorer
 ```
 
-### Programmatic (no Dapr sidecar):
+### Programmatic (no Dapr sidecar, single process):
 
 ```bash
 python -m lab.10_dapr_deep_research --mode run

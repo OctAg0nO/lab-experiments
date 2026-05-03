@@ -1,32 +1,32 @@
 version: 1
 apps:
   - appID: orchestrator
-    appDirPath: ./
+    appDirPath: ../../
     appPort: 8000
     command: python -m lab.10_dapr_deep_research --mode orchestrator
     appProtocol: grpc
-    resourcesPath: ./resources
+    resourcesPath: lab/10_dapr_deep_research/resources
   - appID: explorer-agent
-    appDirPath: ./
+    appDirPath: ../../
     appPort: 8001
     command: python -m lab.10_dapr_deep_research --mode explorer
     appProtocol: grpc
-    resourcesPath: ./resources
+    resourcesPath: lab/10_dapr_deep_research/resources
   - appID: deepreader-agent
-    appDirPath: ./
+    appDirPath: ../../
     appPort: 8002
     command: python -m lab.10_dapr_deep_research --mode deepreader
     appProtocol: grpc
-    resourcesPath: ./resources
+    resourcesPath: lab/10_dapr_deep_research/resources
   - appID: synthesizer-agent
-    appDirPath: ./
+    appDirPath: ../../
     appPort: 8003
     command: python -m lab.10_dapr_deep_research --mode synthesizer
     appProtocol: grpc
-    resourcesPath: ./resources
+    resourcesPath: lab/10_dapr_deep_research/resources
   - appID: critic-agent
-    appDirPath: ./
+    appDirPath: ../../
     appPort: 8004
     command: python -m lab.10_dapr_deep_research --mode critic
     appProtocol: grpc
-    resourcesPath: ./resources
+    resourcesPath: lab/10_dapr_deep_research/resources
