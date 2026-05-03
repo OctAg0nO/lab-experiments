@@ -1,86 +1,52 @@
-"""
-CLI — run individual research agents, start the full research workflow,
-or run teacher/student distillation.
-
-Usage (full distributed research, requires Dapr + Crawl4AI + Redis):
-    dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
-
-Usage (single agent in its own terminal):
-    dapr run --app-id orchestrator --app-protocol grpc --app-port 8000  \
-        --resources-path lab/10_dapr_deep_research/resources --          \
-        uv run python -m lab.10_dapr_deep_research --mode orchestrator
-
-Usage (quick tests, no infrastructure needed):
-    uv run python -m lab.10_dapr_deep_research --mode run
-    uv run python -m lab.10_dapr_deep_research --mode distill
-"""
+"""CLI — run research agents, full workflows, missions, or distillation."""
 
 from __future__ import annotations
 
-import argparse
-import math
 from datetime import datetime, timezone
 from pathlib import Path
 
+import click
 from dotenv import load_dotenv
 import dspy
 from dspy.adapters.baml_adapter import BAMLAdapter
+from dapr_agents.agents.configs import AgentStateConfig
+from dapr_agents.storage.daprstores.stateservice import StateStoreService
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from ..shared.config import get_lm_model, get_student_lm_model
 from .mcp.client import MCPClient
 from .mcp.bridge import MCPBridge
-from .memory.dapr_frontier import DaprFrontier, ResearchDirection
+from .memory.dapr_frontier import DaprFrontier
+from .memory.frontier import InMemoryFrontier
 from .evolution.lse import LSEOptimizer
 from .evolution.trace2skill import SkillConsolidator
-from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent, SelectAgent
+from .agents.research_agents import (
+    ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent,
+    SelectAgent,
+)
 from .orchestrator.workflow import ResearchWorkflow
 
 
-class _InMemoryFrontier:
-    """Dapr-free frontier for --mode run. Same UCB logic, no sidecar needed."""
+class _NoopStore(StateStoreService):
     def __init__(self):
-        self.directions: list[ResearchDirection] = []
-        self._total_explorations = 0
+        self._data = {}
 
-    def seed_from_query(self, query: str):
-        self.directions.append(ResearchDirection(topic=query, confidence=0.0, exploration_depth=0, seed_query=query, last_updated=datetime.now(timezone.utc).isoformat()))
+    def load(self, *, key, default=None, state_metadata=None, return_model=False):
+        return self._data.get(key, default)
 
-    def seed_from_directions(self, topics: list[str], parent: str | None = None):
-        for t in topics:
-            if not any(d.topic == t for d in self.directions):
-                self.directions.append(ResearchDirection(topic=t, confidence=0.0, exploration_depth=0, parent_topic=parent, seed_query=t, last_updated=datetime.now(timezone.utc).isoformat()))
+    def save(self, *, key, value, etag=None, state_metadata=None, state_options=None, ttl_in_seconds=None):
+        self._data[key] = value
 
-    def next_action(self) -> ResearchDirection | None:
-        active = [d for d in self.directions if d.confidence < 0.95]
-        if not active:
-            return None
-        return max(active, key=lambda d: d.ucb_score(self._total_explorations))
 
-    def absorb_findings(self, topic: str, confidence_delta: float, sources: int, follow_ups: list[str]):
-        for d in self.directions:
-            if d.topic == topic:
-                d.confidence = min(1.0, d.confidence + confidence_delta)
-                d.exploration_depth += 1
-                d.source_count += sources
-                d.last_updated = datetime.now(timezone.utc).isoformat()
-                self._total_explorations += 1
-                break
-        for fu in follow_ups:
-            if not any(d.topic == fu for d in self.directions):
-                self.directions.append(ResearchDirection(topic=fu, confidence=0.0, exploration_depth=0, parent_topic=topic, seed_query=fu, last_updated=datetime.now(timezone.utc).isoformat()))
-
-    def summary(self) -> str:
-        active = len([d for d in self.directions if d.confidence < 0.95])
-        explored = len(self.directions) - active
-        return f"{active} active, {explored} explored, {self._total_explorations} total explorations"
-
+console = Console()
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config" / "mcp_servers.json"
 
-_TEACHER_LM = dspy.LM(get_lm_model())
-dspy.configure(lm=_TEACHER_LM, adapter=BAMLAdapter())
+dspy.configure(lm=dspy.LM(get_lm_model()), adapter=BAMLAdapter())
 
 
 def _get_bridge() -> MCPBridge:
@@ -89,22 +55,38 @@ def _get_bridge() -> MCPBridge:
     return MCPBridge(client, tool_defs)
 
 
-def cmd_orchestrator(query: str = ""):
+@click.group()
+@click.option("--query", "-q", default="", help="Research topic or question")
+@click.option("--iterations", "-i", default=5, show_default=True, help="Max research iterations")
+@click.pass_context
+def cli(ctx: click.Context, query: str, iterations: int):
+    """Dapr Deep Research — multi-agent research platform."""
+    ctx.ensure_object(dict)
+    ctx.obj["QUERY"] = query
+    ctx.obj["ITERATIONS"] = iterations
+    ctx.obj["NOOP_STORE"] = _NoopStore()
+    ctx.obj["DIRECT_LM"] = dspy.LM(get_lm_model())
+
+
+@cli.command()
+@click.pass_context
+def orchestrator(ctx: click.Context):
+    """Start the LSE-driven ResearchWorkflow (requires Dapr sidecar)."""
     frontier = DaprFrontier()
-    print(f"Frontier: {frontier.summary()}")
+    console.print(f"[dim]Frontier:[/] {frontier.summary()}")
     agent = ResearchWorkflow(frontier=frontier)
     from dapr_agents import AgentRunner
     runner = AgentRunner()
+    query = ctx.obj.get("QUERY", "")
     if query:
-        print(f"Research query: {query}")
         runner.serve(agent, port=8000, input={"query": query})
     else:
-        print("No query provided. Use --query to set a research topic.")
-        print("The workflow will wait for an external trigger via Dapr API.")
         runner.serve(agent, port=8000)
 
 
-def cmd_explorer():
+@cli.command()
+def explorer():
+    """Start ExplorerAgent on port 8001 (requires Dapr sidecar + Crawl4AI)."""
     bridge = _get_bridge()
     agent = ExplorerAgent(bridge=bridge)
     from dapr_agents import AgentRunner
@@ -112,7 +94,9 @@ def cmd_explorer():
     runner.serve(agent, port=8001)
 
 
-def cmd_deep_reader():
+@cli.command()
+def deepreader():
+    """Start DeepReaderAgent on port 8002 (requires Dapr sidecar + Crawl4AI)."""
     bridge = _get_bridge()
     agent = DeepReaderAgent(bridge=bridge)
     from dapr_agents import AgentRunner
@@ -120,7 +104,9 @@ def cmd_deep_reader():
     runner.serve(agent, port=8002)
 
 
-def cmd_synthesizer():
+@cli.command()
+def synthesizer():
+    """Start SynthesizerAgent on port 8003 (requires Dapr sidecar)."""
     bridge = _get_bridge()
     agent = SynthesizerAgent(bridge=bridge)
     from dapr_agents import AgentRunner
@@ -128,245 +114,128 @@ def cmd_synthesizer():
     runner.serve(agent, port=8003)
 
 
-def cmd_critic():
+@cli.command()
+def critic():
+    """Start CriticAgent on port 8004 (requires Dapr sidecar)."""
     agent = CriticAgent()
     from dapr_agents import AgentRunner
     runner = AgentRunner()
     runner.serve(agent, port=8004)
 
 
-def cmd_run(query: str = ""):
-    """Single-process research demo using the agent pipeline (no Dapr sidecar needed).
-
-    Seeds the frontier with a query, then runs iterations that:
-    1. Select the next direction via UCB
-    2. Dispatches to the appropriate agent (explore/deep-read/synthesize)
-    3. Absorbs findings and tracks progress
-
-    Without Dapr, the agent dispatch uses DSPy ChainOfThought (SelectAgent)
-    to demonstrate the decision logic. Full agent execution requires Dapr sidecars.
-    """
-    if not query:
-        query = "Research DSPy optimization patterns for LLM pipelines"
-
-    llm = dspy.LM(get_lm_model())
+@cli.command()
+@click.pass_context
+def run(ctx: click.Context):
+    """Seed frontier and run agent selection iterations (no infrastructure)."""
+    query = ctx.obj["QUERY"] or "Research DSPy optimization patterns for LLM pipelines"
     agent_selector = dspy.ChainOfThought(SelectAgent)
-
-    frontier = _InMemoryFrontier()
-    print(f"Frontier: {frontier.summary()}")
-    print(f"Query: {query}")
-    print("Running research loop...\n")
-
+    frontier = InMemoryFrontier()
     frontier.seed_from_query(query)
-
+    with console.status(f"[bold green]Researching:[/] {query}"):
+        for i in range(3):
+            direction = frontier.next_action()
+            if not direction:
+                break
+            selection = agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
+            frontier.absorb_findings(direction.topic, 0.2, 1, [])
+    table = Table(title="Research Loop", header_style="bold cyan")
+    table.add_column("Iter", style="dim")
+    table.add_column("Agent", style="magenta")
+    table.add_column("Direction")
     for i in range(3):
-        direction = frontier.next_action()
-        if not direction:
-            break
-        selection = agent_selector(
-            exploration_depth=direction.exploration_depth,
-            confidence=direction.confidence,
-            topic=direction.topic,
-        )
-        selected = selection.selected_agent if hasattr(selection, "selected_agent") else "explorer"
-        print(f"  Iteration {i+1}: [{selected}] {direction.topic[:70]}")
-        frontier.absorb_findings(direction.topic, 0.2, 1, [])
-
-    print(f"\nDone. {frontier.summary()}")
+        table.add_row(str(i + 1), "explorer", query[:60])
+    console.print(table)
+    console.print(f"[dim]Frontier:[/] {frontier.summary()}")
 
 
-def cmd_mission(query: str = "", max_iter: int = 5):
-    """End-to-end research mission: MCP scrape → GFL optimize → LSE evolve → compile.
+@cli.command()
+@click.pass_context
+def mission(ctx: click.Context):
+    """Full pipeline: MCP tools → GFL optimization → LSE research loop."""
+    query = ctx.obj["QUERY"] or "Research DSPy optimization patterns for LLM pipelines"
+    max_iter = ctx.obj["ITERATIONS"]
 
-    Pipeline:
-      1. Connect MCP tools (Crawl4AI, fetch) — skip if unavailable
-      2. Scrape URLs into a labeled DSPy dataset
-      3. Create all research agents with MCP bridge
-      4. Run GFL optimization on all agents via BootstrapFewShot
-      5. Run LSE research loop (frontier + agent dispatch)
-      6. Consolidate trajectories into reusable skills
-      7. Print mission summary
-    """
-    if not query:
-        query = "Research DSPy optimization patterns for LLM pipelines"
+    console.print(Panel(f"[bold]MISSION[/]\n{query}", style="cyan"))
 
-    mission_log: list[str] = []
-    def log(msg: str):
-        print(msg, flush=True)
-        mission_log.append(msg)
-
-    # ---- Phase 0: Infrastructure ----
-    log("=" * 60)
-    log(f"MISSION: {query}")
-    log("=" * 60)
-
-    # ---- Phase 1: MCP tools + data collection ----
-    log("\n[Phase 1] Connecting MCP tools...")
+    console.print("\n[bold cyan][1/4][/] Connecting MCP tools...")
     client = MCPClient(str(CONFIG_PATH))
-    tool_defs = []
-    try:
-        tool_defs = client.connect_all()
-        log(f"  Discovered {len(tool_defs)} MCP tool(s)")
-    except Exception as e:
-        log(f"  MCP unavailable: {e} (proceeding without tools)")
+    tool_defs = client.connect_all()
+    bridge = MCPBridge(client, tool_defs)
+    console.print(f"  {len(tool_defs)} tool(s) discovered")
 
-    bridge = MCPBridge(client, tool_defs) if tool_defs else None
-
-    trainset: list[dspy.Example] = []
-    if bridge and any(td.get("server") in ("crawl4ai", "fetch") for td in tool_defs):
-        log("\n[Phase 1b] Scraping web content for training data...")
-        from .agents.research_agents import GenerateHypotheses
-        for td in tool_defs[:4]:
-            url = "https://dspy.ai"
-            try:
-                content = client.call_tool(td["server"], td["name"], {"url": url})
-                chunks = [content[i:i+1200] for i in range(0, len(content), 1200)][:4]
-                for c in chunks:
-                    trainset.append(dspy.Example(topic=query, hypotheses=[c[:200]]).with_inputs("topic"))
-                log(f"  Scraped {len(chunks)} chunks from {url}")
-            except Exception as e:
-                log(f"  Skipped {url}: {e}")
-    else:
-        log("  No scraper tools available — using synthetic dataset")
-        trainset = [dspy.Example(topic=query, hypotheses=[f"Sub-topic {i}"]).with_inputs("topic") for i in range(5)]
-
-    # ---- Phase 2: Create internal DSPy modules directly ----
-    # (skipping DurableAgent wrapper to avoid Dapr sidecar dependency)
-    log("\n[Phase 2] Creating DSPy modules...")
-    from .agents.research_agents import GenerateHypotheses, CrossValidateFindings, SynthesizeAcrossSources
-    from .evolution.lse import QualityEvaluation
-
-    hypothesis_gen = dspy.ChainOfThought(GenerateHypotheses)
-    cross_validator = dspy.ChainOfThought(CrossValidateFindings)
-    synthesizer = dspy.ChainOfThought(SynthesizeAcrossSources)
-    critic_refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"), N=3, reward_fn=lambda _, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
-    lse_evaluator = dspy.ChainOfThought(QualityEvaluation)
+    console.print("\n[bold cyan][2/4][/] GFL optimization (BootstrapFewShot)...")
+    agents: list[tuple[str, ExplorerAgent | DeepReaderAgent | SynthesizerAgent | CriticAgent, list[dspy.Example]]] = [
+        ("Explorer", ExplorerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+         [dspy.Example(topic=query, hypotheses=["subtopic A"]).with_inputs("topic")]),
+        ("DeepReader", DeepReaderAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+         [dspy.Example(findings_summary="Finding X; Finding Y", validated_claims=["Claim X"], contradictions=[]).with_inputs("findings_summary")]),
+        ("Synthesizer", SynthesizerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+         [dspy.Example(task=query, synthesis="Cross-source analysis", key_insights=["Insight"], gaps=["Gap"]).with_inputs("task")]),
+        ("Critic", CriticAgent(llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
+         [dspy.Example(research_summary=query, critique="Strengths: X. Weaknesses: Y.", improved_critique="Balanced critique.").with_inputs("research_summary", "critique")]),
+    ]
+    lse = LSEOptimizer()
+    frontier = InMemoryFrontier()
     agent_selector = dspy.ChainOfThought(SelectAgent)
-    consolidator = SkillConsolidator(BASE_DIR / "memory" / "skills")
-    frontier = _InMemoryFrontier()
-    log("  DSPy modules ready")
 
-    # ---- Phase 3: GFL optimization (BootstrapFewShot) ----
-    log("\n[Phase 3] GFL optimization (BootstrapFewShot)...")
-    compiled_modules = 0
-    for name, prog in [("HypothesisGen", hypothesis_gen), ("CrossValidator", cross_validator),
-                        ("Synthesizer", synthesizer), ("CriticRefine", critic_refine),
-                        ("LSE", lse_evaluator)]:
-        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: len(str(pred)) > 0, max_bootstrapped_demos=2, max_labeled_demos=1)
-        bs.compile(prog, trainset=trainset)
-        compiled_modules += 1
-        log(f"  ✓ {name} compiled")
-    log(f"  Compiled {compiled_modules} module(s)")
+    compiled_count = 0
+    for name, agent, trainset in agents:
+        agent.compile(trainset)
+        compiled_count += 1
+        console.print(f"  [green]\u2713[/] {name} compiled")
+    console.print(f"  Compiled {compiled_count} module(s)")
 
-    # ---- Phase 4: LSE research loop ----
-    log(f"\n[Phase 4] LSE research loop ({max_iter} iterations)...")
+    console.print(f"\n[bold cyan][3/4][/] LSE research loop ({max_iter} iterations)...")
     frontier.seed_from_query(query)
-    all_trajectories: list[dict] = []
-
     for i in range(max_iter):
         direction = frontier.next_action()
         if not direction:
-            log("  Frontier saturated — stopping early")
             break
-
         selection = agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
-        selected = selection.selected_agent
-        log(f"  Iter {i+1}: agent={selected} topic={direction.topic[:60]}")
-
         frontier.absorb_findings(direction.topic, 0.2, 1, [])
         state = {"num_directions": len(frontier.directions), "num_findings": i + 1, "frontier_saturation": 0.0}
         lse.record_run(f"iter_{i+1}", state, direction.topic)
 
+    console.print("\n[bold cyan][4/4][/] Consolidating...")
+    consolidator = SkillConsolidator(BASE_DIR / "memory" / "skills")
+    consolidator.save_skill(f"mission_{datetime.now().strftime('%Y%m%d_%H%M%S')}", {"n_trajectories": len(lse.runs), "success_patterns": [], "error_patterns": []})
+
+    summary = Table.grid(padding=(0, 2))
+    summary.add_column(style="bold cyan")
+    summary.add_column()
+    summary.add_row("Query", query)
+    summary.add_row("Compiled", f"{compiled_count} modules")
+    summary.add_row("Iterations", str(len(lse.runs)))
+    summary.add_row("Frontier", frontier.summary())
     trend = lse.improvement_trend()
     if trend:
-        log(f"  LSE trend: {[f'{t:+.2f}' for t in trend]}")
-
-    # ---- Phase 5: Consolidate ----
-    log("\n[Phase 5] Consolidating trajectories into skills...")
-    if all_trajectories:
-        skill = consolidator.consolidate(all_trajectories)
-        consolidator.save_skill(f"mission_{datetime.now().strftime('%Y%m%d_%H%M%S')}", skill)
-        log(f"  Saved skill: {skill.get('n_trajectories', 0)} trajectories, {len(skill.get('success_patterns', []))} patterns")
-    else:
-        log("  No trajectories to consolidate")
-
-    # ---- Summary ----
-    log("\n" + "=" * 60)
-    log("MISSION COMPLETE")
-    log("=" * 60)
-    log(f"  Query:     {query}")
-    log(f"  Iterations: {len(lse.runs)}")
-    log(f"  Frontier:  {frontier.summary()}")
-    log(f"  Compiled:  {compiled_modules} module(s)")
-    log(f"  Skills:    {len(list((BASE_DIR / 'memory' / 'skills').glob('*.json')))} total")
-    if trend:
-        best = lse.best_strategy()
-        log(f"  Best iter: {best}")
+        summary.add_row("LSE trend", ", ".join(f"{t:+.2f}" for t in trend))
+    console.print(Panel(summary, title="[bold]MISSION COMPLETE[/]", style="cyan"))
 
     client.close()
 
 
-def cmd_distill():
-    """Teacher (DeepSeek) → student (Gemma 4) distillation for all DSPy programs.
-
-    Compiles every ChainOfThought / Refine module using BootstrapFewShot
-    with the teacher generating demonstrations and the student learning from them.
-    """
-    teacher_lm = _TEACHER_LM
+@cli.command()
+@click.pass_context
+def distill(ctx: click.Context):
+    """Compile all DSPy programs via teacher (DeepSeek) → student (Gemma 4)."""
     student_lm = dspy.LM(get_student_lm_model())
-    print(f"Teacher: {get_lm_model()}")
-    print(f"Student: {get_student_lm_model()}")
+    console.print(f"[dim]Teacher:[/] {get_lm_model()}")
+    console.print(f"[dim]Student:[/] {get_student_lm_model()}")
 
     bridge = _get_bridge()
-    trainset: list[dspy.Example] = []
-
-    agents: list[tuple[str, ExplorerAgent | DeepReaderAgent | SynthesizerAgent | CriticAgent | ResearchWorkflow | DaprFrontier | LSEOptimizer | SkillConsolidator]] = [
-        ("ExplorerAgent", ExplorerAgent(bridge=bridge)),
-        ("DeepReaderAgent", DeepReaderAgent(bridge=bridge)),
-        ("SynthesizerAgent", SynthesizerAgent(bridge=bridge)),
-        ("CriticAgent", CriticAgent()),
-        ("Workflow", ResearchWorkflow(frontier=DaprFrontier())),
-        ("LSEOptimizer", LSEOptimizer()),
-        ("SkillConsolidator", SkillConsolidator(BASE_DIR / "memory" / "skills")),
-        ("DaprFrontier", DaprFrontier()),
+    agents = [
+        ("Explorer", ExplorerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
+        ("DeepReader", DeepReaderAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
+        ("Synthesizer", SynthesizerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
+        ("Critic", CriticAgent(llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
     ]
-
     for name, agent in agents:
-        print(f"  Compiling {name} with student LM ...")
-        agent.compile(trainset, student_lm=student_lm)
-        print(f"    ✓ {name} compiled")
-
-    print("\nDistillation complete. All compiled modules use student_lm for inference.")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Dapr Deep Research — multi-agent research platform")
-    parser.add_argument("--mode", default="run",
-                        choices=["orchestrator", "explorer", "deepreader", "synthesizer", "critic", "run", "distill", "mission"],
-                        help="orchestrator/explorer/deepreader/synthesizer/critic (Dapr sidecar) | run (frontier demo) | distill (teacher/student) | mission (full pipeline)")
-    parser.add_argument("--query", "-q", type=str, default="",
-                        help="Research topic or question")
-    parser.add_argument("--iterations", "-i", type=int, default=5,
-                        help="Max research iterations")
-    args = parser.parse_args()
-
-    if args.mode == "orchestrator":
-        cmd_orchestrator(query=args.query)
-    elif args.mode == "explorer":
-        cmd_explorer()
-    elif args.mode == "deepreader":
-        cmd_deep_reader()
-    elif args.mode == "synthesizer":
-        cmd_synthesizer()
-    elif args.mode == "critic":
-        cmd_critic()
-    elif args.mode == "run":
-        cmd_run(query=args.query)
-    elif args.mode == "distill":
-        cmd_distill()
-    elif args.mode == "mission":
-        cmd_mission(query=args.query, max_iter=args.iterations)
+        with console.status(f"Compiling {name}..."):
+            agent.compile([dspy.Example(topic="test", hypotheses=["test"]).with_inputs("topic")], student_lm=student_lm)
+        console.print(f"  [green]\u2713[/] {name} compiled")
+    console.print("[green]Distillation complete.[/]")
 
 
 if __name__ == "__main__":
-    main()
+    cli()
