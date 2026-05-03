@@ -116,7 +116,7 @@ def _rlm_factory(signature: str, max_iter: int = 20, max_calls: int = 50, tools:
 # ---------------------------------------------------------------------------
 
 class ExplorerAgent(DurableAgent):
-    def __init__(self, bridge: MCPBridge, **kwargs):
+    def __init__(self, bridge: MCPBridge, llm: dspy.LM | None = None, state: AgentStateConfig | None = None, **kwargs):
         dspy_tools = bridge.get_dspy_tools()
         search_tools = [t for t in dspy_tools if t.__name__ in ("search", "chat", "model_list")] or dspy_tools
         self._rlm = _rlm_factory("task: str -> result: ExplorationResult", max_iter=8, max_calls=12, tools=search_tools)
@@ -126,9 +126,9 @@ class ExplorerAgent(DurableAgent):
             name="ExplorerAgent", role="Research Explorer",
             goal="Discover novel research directions and topics",
             instructions=["Identify unexplored angles", "Return diverse directions", "Be specific"],
-            llm=DaprChatClient(component_name="llm-provider"),
+            llm=llm or DaprChatClient(component_name="llm-provider"),
             tools=bridge.get_agent_tools(),
-            state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
+            state=state or AgentStateConfig(store=StateStoreService(store_name="research-state")),
             execution=AgentExecutionConfig(max_iterations=10, tool_execution_mode=ToolExecutionMode.PARALLEL),
             **kwargs,
         )
@@ -150,7 +150,7 @@ class ExplorerAgent(DurableAgent):
         directions = rlm_result.result.directions if hasattr(rlm_result, "result") and rlm_result.result else []
         hyp = self._hypothesis_gen(topic=input["topic"])
         best = self._hypothesis_best(topic=input["topic"])
-        all_topics = [d.topic for d in directions if hasattr(d, "topic")]
+        all_topics = [d.topic for d in directions]
         if hyp.hypotheses:
             all_topics.extend(hyp.hypotheses[:3])
         if hasattr(best, "hypotheses") and best.hypotheses:
@@ -164,7 +164,7 @@ class ExplorerAgent(DurableAgent):
 # ---------------------------------------------------------------------------
 
 class DeepReaderAgent(DurableAgent):
-    def __init__(self, bridge: MCPBridge, **kwargs):
+    def __init__(self, bridge: MCPBridge, llm: dspy.LM | None = None, **kwargs):
         dspy_tools = bridge.get_dspy_tools()
         fetch_tools = [t for t in dspy_tools if t.__name__ in ("fetch", "md", "crawl")] or dspy_tools
         self._rlm = _rlm_factory("topic: str, url: str -> result: DeepReadResult", max_iter=10, max_calls=16, tools=fetch_tools)
@@ -173,7 +173,7 @@ class DeepReaderAgent(DurableAgent):
             name="DeepReaderAgent", role="Content Analyst",
             goal="Extract structured findings from web content",
             instructions=["Read thoroughly", "Extract specific claims with evidence", "Rate confidence"],
-            llm=DaprChatClient(component_name="llm-provider"),
+            llm=llm or DaprChatClient(component_name="llm-provider"),
             tools=bridge.get_agent_tools(),
             state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
             execution=AgentExecutionConfig(max_iterations=10, tool_execution_mode=ToolExecutionMode.PARALLEL),
@@ -213,7 +213,7 @@ class DeepReaderAgent(DurableAgent):
 # ---------------------------------------------------------------------------
 
 class SynthesizerAgent(DurableAgent):
-    def __init__(self, bridge: MCPBridge, **kwargs):
+    def __init__(self, bridge: MCPBridge, llm: dspy.LM | None = None, **kwargs):
         dspy_tools = bridge.get_dspy_tools()
         self._rlm = _rlm_factory("task: str -> result: SynthesisReport", max_iter=8, max_calls=12, tools=dspy_tools)
         self._synthesizer = dspy.ChainOfThought(SynthesizeAcrossSources)
@@ -221,7 +221,7 @@ class SynthesizerAgent(DurableAgent):
             name="SynthesizerAgent", role="Research Synthesizer",
             goal="Synthesize findings across sources",
             instructions=["Identify patterns", "Highlight contradictions", "Suggest gaps"],
-            llm=DaprChatClient(component_name="llm-provider"),
+            llm=llm or DaprChatClient(component_name="llm-provider"),
             tools=bridge.get_agent_tools(),
             state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
             execution=AgentExecutionConfig(max_iterations=8, tool_execution_mode=ToolExecutionMode.PARALLEL),
@@ -259,7 +259,7 @@ class SynthesizerAgent(DurableAgent):
 # ---------------------------------------------------------------------------
 
 class CriticAgent(DurableAgent):
-    def __init__(self, **kwargs):
+    def __init__(self, llm: dspy.LM | None = None, **kwargs):
         self._rlm = _rlm_factory("research_summary: str -> result: Critique", max_iter=6, max_calls=8)
         self._refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"), N=3, reward_fn=lambda _, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
         self._comparison = dspy.MultiChainComparison(CritiqueReasoning, n=3)
@@ -268,7 +268,7 @@ class CriticAgent(DurableAgent):
             name="CriticAgent", role="Research Critic",
             goal="Evaluate research quality and find gaps",
             instructions=["Be critical but constructive", "Identify missing angles", "Prioritize follow-ups"],
-            llm=DaprChatClient(component_name="llm-provider"),
+            llm=llm or DaprChatClient(component_name="llm-provider"),
             state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
             execution=AgentExecutionConfig(max_iterations=6),
             **kwargs,

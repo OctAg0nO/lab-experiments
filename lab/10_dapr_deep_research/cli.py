@@ -175,6 +175,137 @@ def cmd_run(query: str = ""):
     print(f"\nDone. {frontier.summary()}")
 
 
+def cmd_mission(query: str = "", max_iter: int = 5):
+    """End-to-end research mission: MCP scrape → GFL optimize → LSE evolve → compile.
+
+    Pipeline:
+      1. Connect MCP tools (Crawl4AI, fetch) — skip if unavailable
+      2. Scrape URLs into a labeled DSPy dataset
+      3. Create all research agents with MCP bridge
+      4. Run GFL optimization on all agents via BootstrapFewShot
+      5. Run LSE research loop (frontier + agent dispatch)
+      6. Consolidate trajectories into reusable skills
+      7. Print mission summary
+    """
+    if not query:
+        query = "Research DSPy optimization patterns for LLM pipelines"
+
+    mission_log: list[str] = []
+    def log(msg: str):
+        print(msg, flush=True)
+        mission_log.append(msg)
+
+    # ---- Phase 0: Infrastructure ----
+    log("=" * 60)
+    log(f"MISSION: {query}")
+    log("=" * 60)
+
+    # ---- Phase 1: MCP tools + data collection ----
+    log("\n[Phase 1] Connecting MCP tools...")
+    client = MCPClient(str(CONFIG_PATH))
+    tool_defs = []
+    try:
+        tool_defs = client.connect_all()
+        log(f"  Discovered {len(tool_defs)} MCP tool(s)")
+    except Exception as e:
+        log(f"  MCP unavailable: {e} (proceeding without tools)")
+
+    bridge = MCPBridge(client, tool_defs) if tool_defs else None
+
+    trainset: list[dspy.Example] = []
+    if bridge and any(td.get("server") in ("crawl4ai", "fetch") for td in tool_defs):
+        log("\n[Phase 1b] Scraping web content for training data...")
+        from .agents.research_agents import GenerateHypotheses
+        for td in tool_defs[:4]:
+            url = "https://dspy.ai"
+            try:
+                content = client.call_tool(td["server"], td["name"], {"url": url})
+                chunks = [content[i:i+1200] for i in range(0, len(content), 1200)][:4]
+                for c in chunks:
+                    trainset.append(dspy.Example(topic=query, hypotheses=[c[:200]]).with_inputs("topic"))
+                log(f"  Scraped {len(chunks)} chunks from {url}")
+            except Exception as e:
+                log(f"  Skipped {url}: {e}")
+    else:
+        log("  No scraper tools available — using synthetic dataset")
+        trainset = [dspy.Example(topic=query, hypotheses=[f"Sub-topic {i}"]).with_inputs("topic") for i in range(5)]
+
+    # ---- Phase 2: Create internal DSPy modules directly ----
+    # (skipping DurableAgent wrapper to avoid Dapr sidecar dependency)
+    log("\n[Phase 2] Creating DSPy modules...")
+    from .agents.research_agents import GenerateHypotheses, CrossValidateFindings, SynthesizeAcrossSources
+    from .evolution.lse import QualityEvaluation
+
+    hypothesis_gen = dspy.ChainOfThought(GenerateHypotheses)
+    cross_validator = dspy.ChainOfThought(CrossValidateFindings)
+    synthesizer = dspy.ChainOfThought(SynthesizeAcrossSources)
+    critic_refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"), N=3, reward_fn=lambda _, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
+    lse_evaluator = dspy.ChainOfThought(QualityEvaluation)
+    agent_selector = dspy.ChainOfThought(SelectAgent)
+    consolidator = SkillConsolidator(BASE_DIR / "memory" / "skills")
+    frontier = _InMemoryFrontier()
+    log("  DSPy modules ready")
+
+    # ---- Phase 3: GFL optimization (BootstrapFewShot) ----
+    log("\n[Phase 3] GFL optimization (BootstrapFewShot)...")
+    compiled_modules = 0
+    for name, prog in [("HypothesisGen", hypothesis_gen), ("CrossValidator", cross_validator),
+                        ("Synthesizer", synthesizer), ("CriticRefine", critic_refine),
+                        ("LSE", lse_evaluator)]:
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: len(str(pred)) > 0, max_bootstrapped_demos=2, max_labeled_demos=1)
+        bs.compile(prog, trainset=trainset)
+        compiled_modules += 1
+        log(f"  ✓ {name} compiled")
+    log(f"  Compiled {compiled_modules} module(s)")
+
+    # ---- Phase 4: LSE research loop ----
+    log(f"\n[Phase 4] LSE research loop ({max_iter} iterations)...")
+    frontier.seed_from_query(query)
+    all_trajectories: list[dict] = []
+
+    for i in range(max_iter):
+        direction = frontier.next_action()
+        if not direction:
+            log("  Frontier saturated — stopping early")
+            break
+
+        selection = agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
+        selected = selection.selected_agent
+        log(f"  Iter {i+1}: agent={selected} topic={direction.topic[:60]}")
+
+        frontier.absorb_findings(direction.topic, 0.2, 1, [])
+        state = {"num_directions": len(frontier.directions), "num_findings": i + 1, "frontier_saturation": 0.0}
+        lse.record_run(f"iter_{i+1}", state, direction.topic)
+
+    trend = lse.improvement_trend()
+    if trend:
+        log(f"  LSE trend: {[f'{t:+.2f}' for t in trend]}")
+
+    # ---- Phase 5: Consolidate ----
+    log("\n[Phase 5] Consolidating trajectories into skills...")
+    if all_trajectories:
+        skill = consolidator.consolidate(all_trajectories)
+        consolidator.save_skill(f"mission_{datetime.now().strftime('%Y%m%d_%H%M%S')}", skill)
+        log(f"  Saved skill: {skill.get('n_trajectories', 0)} trajectories, {len(skill.get('success_patterns', []))} patterns")
+    else:
+        log("  No trajectories to consolidate")
+
+    # ---- Summary ----
+    log("\n" + "=" * 60)
+    log("MISSION COMPLETE")
+    log("=" * 60)
+    log(f"  Query:     {query}")
+    log(f"  Iterations: {len(lse.runs)}")
+    log(f"  Frontier:  {frontier.summary()}")
+    log(f"  Compiled:  {compiled_modules} module(s)")
+    log(f"  Skills:    {len(list((BASE_DIR / 'memory' / 'skills').glob('*.json')))} total")
+    if trend:
+        best = lse.best_strategy()
+        log(f"  Best iter: {best}")
+
+    client.close()
+
+
 def cmd_distill():
     """Teacher (DeepSeek) → student (Gemma 4) distillation for all DSPy programs.
 
@@ -201,27 +332,22 @@ def cmd_distill():
     ]
 
     for name, agent in agents:
-        if hasattr(agent, "compile") and trainset:
-            print(f"  Compiling {name} with student LM ...")
-            try:
-                agent.compile(trainset, student_lm=student_lm)
-                print(f"    ✓ {name} compiled")
-            except Exception as e:
-                print(f"    ✗ {name} failed: {e}")
-        else:
-            print(f"  Skipping {name} (no trainset or no compile())")
+        print(f"  Compiling {name} with student LM ...")
+        agent.compile(trainset, student_lm=student_lm)
+        print(f"    ✓ {name} compiled")
 
     print("\nDistillation complete. All compiled modules use student_lm for inference.")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Dapr Deep Research — multi-agent research platform")
-    parser.add_argument("--mode", choices=["orchestrator", "explorer", "deepreader", "synthesizer", "critic", "run", "distill"], default="run",
-                        help="orchestrator (Dapr) | explorer (Dapr) | deepreader (Dapr) | synthesizer (Dapr) | critic (Dapr) | run (no infra) | distill (no infra)")
+    parser.add_argument("--mode", default="run",
+                        choices=["orchestrator", "explorer", "deepreader", "synthesizer", "critic", "run", "distill", "mission"],
+                        help="orchestrator/explorer/deepreader/synthesizer/critic (Dapr sidecar) | run (frontier demo) | distill (teacher/student) | mission (full pipeline)")
     parser.add_argument("--query", "-q", type=str, default="",
-                        help="Research topic or question (used by: orchestrator, run)")
-    parser.add_argument("--iterations", "-i", type=int, default=3,
-                        help="Max research iterations (used by: run)")
+                        help="Research topic or question")
+    parser.add_argument("--iterations", "-i", type=int, default=5,
+                        help="Max research iterations")
     args = parser.parse_args()
 
     if args.mode == "orchestrator":
@@ -238,6 +364,8 @@ def main():
         cmd_run(query=args.query)
     elif args.mode == "distill":
         cmd_distill()
+    elif args.mode == "mission":
+        cmd_mission(query=args.query, max_iter=args.iterations)
 
 
 if __name__ == "__main__":

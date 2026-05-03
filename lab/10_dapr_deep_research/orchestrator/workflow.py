@@ -105,7 +105,7 @@ class ResearchWorkflow(DurableAgent):
                 confidence=direction.confidence,
                 topic=topic,
             )
-            selected = selection.selected_agent if hasattr(selection, "selected_agent") else ""
+            selected = selection.selected_agent
 
             if selected == "explorer" or direction.exploration_depth == 0:
                 result = yield call_agent(ctx, "explore", input={"topic": topic}, app_id="explorer-agent")

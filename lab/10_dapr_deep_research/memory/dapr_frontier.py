@@ -122,7 +122,7 @@ class DaprFrontier:
         candidates = []
         for d in self.directions:
             pred = self._saturation(topic=d.topic, confidence=d.confidence, exploration_depth=d.exploration_depth, source_count=d.source_count)
-            if not hasattr(pred, "is_saturated") or not pred.is_saturated:
+            if not pred.is_saturated:
                 candidates.append(d)
         if not candidates:
             return None
@@ -150,7 +150,7 @@ class DaprFrontier:
         unsat = []
         for d in self.directions:
             pred = self._saturation(topic=d.topic, confidence=d.confidence, exploration_depth=d.exploration_depth, source_count=d.source_count)
-            if not hasattr(pred, "is_saturated") or not pred.is_saturated:
+            if not pred.is_saturated:
                 unsat.append(d)
         return len(unsat) == 0
 
