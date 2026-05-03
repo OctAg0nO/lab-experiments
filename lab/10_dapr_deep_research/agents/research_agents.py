@@ -83,7 +83,7 @@ class SelectAgent(dspy.Signature):
 # RLM factory
 # ---------------------------------------------------------------------------
 
-def _rlm_factory(signature: str, tools: list, max_iter: int, max_calls: int) -> dspy.RLM:
+def _rlm_factory(signature: str, max_iter: int = 20, max_calls: int = 50, tools: list | None = None):
     return dspy.RLM(signature, tools=tools, max_iterations=max_iter, max_llm_calls=max_calls, verbose=False)
 
 # ---------------------------------------------------------------------------
@@ -95,10 +95,9 @@ class ExplorerAgent(DurableAgent):
     def __init__(self, bridge: MCPBridge, **kwargs):
         dspy_tools = bridge.get_dspy_tools()
         search_tools = [t for t in dspy_tools if t.__name__ in ("search", "chat", "model_list")] or dspy_tools
-        self._rlm = _rlm_factory("task: str -> result: ExplorationResult", search_tools, 8, 12)
+        self._rlm = _rlm_factory("task: str -> result: ExplorationResult", max_iter=8, max_calls=12, tools=search_tools)
         self._hypothesis_gen = dspy.ChainOfThought(GenerateHypotheses)
-        self._hypothesis_best = dspy.BestOfN(dspy.ChainOfThought(GenerateHypotheses), N=3, reward_fn=lambda args, pred: len(pred.hypotheses) if hasattr(pred, "hypotheses") else 0, threshold=0.5)
-        self._compiled = False
+        self._hypothesis_best = dspy.BestOfN(dspy.ChainOfThought(GenerateHypotheses), N=3, reward_fn=lambda _, pred: len(pred.hypotheses) if hasattr(pred, "hypotheses") else 0, threshold=0.5)
         super().__init__(
             name="ExplorerAgent", role="Research Explorer",
             goal="Discover novel research directions and topics",
@@ -111,9 +110,8 @@ class ExplorerAgent(DurableAgent):
         )
 
     def compile(self, trainset: list[dspy.Example]):
-        bs = dspy.BootstrapFewShot(metric=lambda ex, pred, trace=None: len(pred.hypotheses) > 0, max_bootstrapped_demos=4, max_labeled_demos=2)
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: len(pred.hypotheses) > 0, max_bootstrapped_demos=4, max_labeled_demos=2)
         self._hypothesis_gen = bs.compile(self._hypothesis_gen, trainset=trainset)
-        self._compiled = True
 
     @workflow_entry
     def explore(self, ctx, input: dict) -> dict:
@@ -138,7 +136,7 @@ class DeepReaderAgent(DurableAgent):
     def __init__(self, bridge: MCPBridge, **kwargs):
         dspy_tools = bridge.get_dspy_tools()
         fetch_tools = [t for t in dspy_tools if t.__name__ in ("fetch", "md", "crawl")] or dspy_tools
-        self._rlm = _rlm_factory("topic: str, url: str -> result: DeepReadResult", fetch_tools, 10, 16)
+        self._rlm = _rlm_factory("topic: str, url: str -> result: DeepReadResult", max_iter=10, max_calls=16, tools=fetch_tools)
         self._cross_validator = dspy.ChainOfThought(CrossValidateFindings)
         super().__init__(
             name="DeepReaderAgent", role="Content Analyst",
@@ -175,7 +173,7 @@ class DeepReaderAgent(DurableAgent):
 class SynthesizerAgent(DurableAgent):
     def __init__(self, bridge: MCPBridge, **kwargs):
         dspy_tools = bridge.get_dspy_tools()
-        self._rlm = _rlm_factory("task: str -> result: SynthesisReport", dspy_tools, 8, 12)
+        self._rlm = _rlm_factory("task: str -> result: SynthesisReport", max_iter=8, max_calls=12, tools=dspy_tools)
         self._synthesizer = dspy.ChainOfThought(SynthesizeAcrossSources)
         super().__init__(
             name="SynthesizerAgent", role="Research Synthesizer",
@@ -192,11 +190,12 @@ class SynthesizerAgent(DurableAgent):
     def synthesize(self, ctx, input: dict) -> dict:
         result = self._rlm(task=f"Synthesize: {input['topic']}")
         r = result.result if hasattr(result, "result") and result.result else None
+        cot = self._synthesizer(task=input["topic"])
         ctx.set_state("synthesis_result", {
             "topic": input["topic"],
-            "synthesis": r.synthesis if r and hasattr(r, "synthesis") else "",
-            "insights": r.key_insights if r and hasattr(r, "key_insights") else [],
-            "gaps": r.gaps if r and hasattr(r, "gaps") else [],
+            "synthesis": r.synthesis if r and hasattr(r, "synthesis") else cot.synthesis if cot and hasattr(cot, "synthesis") else "",
+            "insights": r.key_insights if r and hasattr(r, "key_insights") else (cot.key_insights if cot and hasattr(cot, "key_insights") else []),
+            "gaps": r.gaps if r and hasattr(r, "gaps") else (cot.gaps if cot and hasattr(cot, "gaps") else []),
         })
         return ctx.get_state("synthesis_result")
 
@@ -208,9 +207,9 @@ class SynthesizerAgent(DurableAgent):
 
 class CriticAgent(DurableAgent):
     def __init__(self, **kwargs):
-        self._rlm = _rlm_factory("research_summary: str -> result: Critique", [], 6, 8)
-        self._refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"), N=3, reward_fn=lambda args, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
-        self._rlm_second = _rlm_factory("research_summary: str, refinement_guidance: str -> result: Critique", [], 4, 6)
+        self._rlm = _rlm_factory("research_summary: str -> result: Critique", max_iter=6, max_calls=8)
+        self._refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"), N=3, reward_fn=lambda _, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
+        self._rlm_second = _rlm_factory("research_summary: str, refinement_guidance: str -> result: Critique", max_iter=4, max_calls=6)
         super().__init__(
             name="CriticAgent", role="Research Critic",
             goal="Evaluate research quality and find gaps",
