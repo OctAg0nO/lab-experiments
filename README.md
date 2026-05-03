@@ -41,6 +41,12 @@ cp .env.example .env   # fill in DEEPSEEK_API_KEY and configure models
 
 ## Running
 
+## Documentation
+
+Complete API reference for every module is in [`docs/`](docs/INDEX.md) — signatures, classes, functions, DSPy modules, and usage patterns for all 12 sub-projects.
+
+## Running
+
 Each sub-project is self-contained:
 
 ```bash
