@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
 
 import click
 from dotenv import load_dotenv
@@ -22,7 +23,8 @@ from .memory.frontier import InMemoryFrontier
 from .memory.noop_store import NoopStore
 from .evolution.lse import LSEOptimizer
 from .evolution.trace2skill import SkillConsolidator
-from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent, SelectAgent
+from ..shared.research import MAX_BOOTSTRAPPED_DEMOS, MAX_LABELED_DEMOS
+from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent, SelectAgent, ComputeConfidenceDelta
 from .orchestrator.workflow import ResearchWorkflow
 
 
@@ -85,18 +87,17 @@ _DAPR_COMMANDS: list[tuple[str, str, type[ExplorerAgent | DeepReaderAgent | Synt
 ]
 
 
-def _make_dapr_cmd(name: str, agent_cls: type, needs_bridge: bool):
-    @cli.command(name=name)
+def _make_dapr_cmd(name: str, desc: str, agent_cls: type, needs_bridge: bool):
+    @cli.command(name=name, help=f"Start {desc} on port {get_agent_port(name)}.")
     def cmd():
         agent = agent_cls(bridge=_get_bridge()) if needs_bridge else agent_cls()
         from dapr_agents import AgentRunner
         AgentRunner().serve(agent, port=get_agent_port(name))
-    cmd.__doc__ = f"Start {name} on port {get_agent_port(name)}."
     return cmd
 
 
-for _name, _doc, _cls, _needs_bridge in _DAPR_COMMANDS:
-    _make_dapr_cmd(_name, _cls, _needs_bridge)
+for _name, _desc, _cls, _needs_bridge in _DAPR_COMMANDS:
+    _make_dapr_cmd(_name, _desc, _cls, _needs_bridge)
 
 
 @cli.command()
@@ -140,23 +141,33 @@ def mission(ctx: click.Context):
     console.print(f"  {len(tool_defs)} tool(s) discovered")
 
     console.print("\n[bold cyan][2/4][/] GFL optimization (BootstrapFewShot)...")
-    agents = _create_agents(bridge, ctx.obj["DIRECT_LM"])
-    agent_trainsets = {
-        "explorer": [dspy.Example(topic=query, hypotheses=["subtopic A"]).with_inputs("topic")],
-        "deepreader": [dspy.Example(findings_summary="Finding X; Finding Y", validated_claims=["Claim X"], contradictions=[]).with_inputs("findings_summary")],
-        "synthesizer": [dspy.Example(task=query, synthesis="Cross-source analysis", key_insights=["Insight"], gaps=["Gap"]).with_inputs("task")],
-        "critic": [dspy.Example(research_summary=query, critique="Strengths: X. Weaknesses: Y.", improved_critique="Balanced critique.").with_inputs("research_summary", "critique")],
-    }
     lse = LSEOptimizer()
     frontier = InMemoryFrontier()
     agent_selector = dspy.ChainOfThought(SelectAgent)
+    conf_delta = dspy.ChainOfThought(ComputeConfidenceDelta)
 
-    compiled_count = 0
-    for name, trainset in agent_trainsets.items():
-        agents[name].compile(trainset)
-        compiled_count += 1
-        console.print(f"  [green]\u2713[/] {name} compiled")
-    console.print(f"  Compiled {compiled_count} module(s)")
+    def _compile_cot(sig_cls, trainset):
+        module = dspy.ChainOfThought(sig_cls)
+        bs = dspy.BootstrapFewShot(
+            metric=lambda _ex, pred, _trace: True,
+            max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
+            max_labeled_demos=MAX_LABELED_DEMOS,
+        )
+        return bs.compile(module, teacher=module, trainset=trainset)
+
+    agent_selector = _compile_cot(SelectAgent, [dspy.Example(
+        exploration_depth=0, confidence=0.0, topic=query,
+        selected_agent="explorer",
+    ).with_inputs("exploration_depth", "confidence", "topic")])
+
+    conf_delta = _compile_cot(ComputeConfidenceDelta, [dspy.Example(
+        topic=query, agent_type="explorer", num_findings=3,
+        findings_summary="subtopics discovered", exploration_depth=0,
+        confidence_delta=0.3, reasoning="New unexplored topic",
+    ).with_inputs("topic", "agent_type", "num_findings", "findings_summary", "exploration_depth")])
+
+    console.print("  [green]\u2713[/] agent_selector, conf_delta compiled")
+    compiled_count = 2
 
     console.print(f"\n[bold cyan][3/4][/] LSE research loop ({max_iter} iterations)...")
     frontier.seed_from_query(query)
@@ -164,8 +175,10 @@ def mission(ctx: click.Context):
         direction = frontier.next_action()
         if not direction:
             break
-        agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
-        frontier.absorb_findings(direction.topic, 0.2, 1, [])
+        selection = agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
+        delta = conf_delta(topic=direction.topic, agent_type=selection.selected_agent, num_findings=1, findings_summary=direction.topic[:100], exploration_depth=direction.exploration_depth)
+        confidence_delta = max(0.0, min(0.5, delta.confidence_delta)) if hasattr(delta, "confidence_delta") else 0.2
+        frontier.absorb_findings(direction.topic, confidence_delta, 1, [])
         state = {"num_directions": len(frontier.directions), "num_findings": i + 1, "frontier_saturation": 0.0}
         lse.record_run(f"iter_{i+1}", state, direction.topic)
 
