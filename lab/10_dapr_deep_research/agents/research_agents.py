@@ -209,7 +209,7 @@ class SynthesizerAgent(DurableAgent):
 class CriticAgent(DurableAgent):
     def __init__(self, **kwargs):
         self._rlm = _rlm_factory("research_summary: str -> result: Critique", [], 6, 8)
-        self._refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"))
+        self._refine = dspy.Refine(dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str"), N=3, reward_fn=lambda args, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
         self._rlm_second = _rlm_factory("research_summary: str, refinement_guidance: str -> result: Critique", [], 4, 6)
         super().__init__(
             name="CriticAgent", role="Research Critic",
