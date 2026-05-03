@@ -4,31 +4,19 @@ Multi-agent research platform combining **dapr-agents** (durable workflows, stat
 
 ## Architecture
 
-```text
-                              ┌─────────────────────────────────┐
-                              │        ResearchWorkflow          │
-                              │   (DurableAgent - LSE + Frontier)│
-                              └────┬────┬──────┬────┬────────────┘
-                                   │    │      │    │
-                     call_agent()  │    │      │    │  call_agent()
-                                   ▼    ▼      ▼    ▼
-                    ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-                    │Explorer│ │DeepRead│ │Synthes.│ │ Critic │
-                    │ Agent  │ │ Agent  │ │ Agent  │ │ Agent  │
-                    │DSPy RLM│ │DSPy RLM│ │DSPy RLM│ │DSPy RLM│
-                    └────┬───┘ └────┬───┘ └────┬───┘ └────┬───┘
-                         │          │          │          │
-                         └──────────┴──────────┴──────────┘
-                                     │
-                              ┌──────▼──────┐
-                              │  Dapr State  │
-                              │  + Pub/Sub   │
-                              │   (Redis)    │
-                              └─────────────┘
+```mermaid
+flowchart TB
+    O[ResearchWorkflow<br/>DurableAgent<br/>LSE + DaprFrontier]
 
- Orchestrator → dispatches agents via call_agent()
- Agents      → each wraps a DSPy RLM for AI reasoning
- State       → frontier, findings, LSE state persisted in Redis
+    O -- call_agent --> E[Explorer Agent<br/>DSPy RLM]
+    O -- call_agent --> DR[DeepReader Agent<br/>DSPy RLM]
+    O -- call_agent --> S[Synthesizer Agent<br/>DSPy RLM]
+    O -- call_agent --> C[Critic Agent<br/>DSPy RLM]
+
+    E --> ST[Dapr State Store<br/>+ Pub/Sub<br/>(Redis)]
+    DR --> ST
+    S --> ST
+    C --> ST
 ```
 
 Each agent is a `DurableAgent` subclass with:
