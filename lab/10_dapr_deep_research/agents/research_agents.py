@@ -97,7 +97,7 @@ class ExplorerAgent(DurableAgent):
         search_tools = [t for t in dspy_tools if t.__name__ in ("search", "chat", "model_list")] or dspy_tools
         self._rlm = _rlm_factory("task: str -> result: ExplorationResult", search_tools, 8, 12)
         self._hypothesis_gen = dspy.ChainOfThought(GenerateHypotheses)
-        self._parallel_hyp = dspy.Parallel(dspy.ChainOfThought(GenerateHypotheses), n=3)
+        self._hypothesis_best = dspy.BestOfN(dspy.ChainOfThought(GenerateHypotheses), n=3, metric=lambda ex, pred, trace=None: len(pred.hypotheses) if hasattr(pred, "hypotheses") else 0)
         self._compiled = False
         super().__init__(
             name="ExplorerAgent", role="Research Explorer",
@@ -120,13 +120,12 @@ class ExplorerAgent(DurableAgent):
         rlm_result = self._rlm(task=input["topic"])
         directions = rlm_result.result.directions if hasattr(rlm_result, "result") and rlm_result.result else []
         hyp = self._hypothesis_gen(topic=input["topic"])
-        parallel_results = self._parallel_hyp(topic=input["topic"])
+        best = self._hypothesis_best(topic=input["topic"])
         all_topics = [d.topic for d in directions if hasattr(d, "topic")]
         if hyp.hypotheses:
             all_topics.extend(hyp.hypotheses[:3])
-        for pr in parallel_results:
-            if hasattr(pr, "hypotheses") and pr.hypotheses:
-                all_topics.extend(pr.hypotheses[:2])
+        if hasattr(best, "hypotheses") and best.hypotheses:
+            all_topics.extend(best.hypotheses[:2])
         ctx.set_state("explorer_result", {"topic": input["topic"], "directions": [{"topic": t} for t in set(all_topics)]})
         return ctx.get_state("explorer_result")
 

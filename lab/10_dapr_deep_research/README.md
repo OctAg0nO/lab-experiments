@@ -36,7 +36,7 @@ All agents wrapped in `@workflow_entry` for durable execution with `DaprChatClie
 | Component | DSPy Implementation | Dapr Role |
 |-----------|-------------------|-----------|
 | Quality eval | `dspy.ChainOfThought(QualityEvaluation)` | State persisted in Redis |
-| Pattern extraction | `dspy.Parallel(dspy.ChainOfThought(ExtractPatterns))` | State persisted in Redis |
+| Pattern extraction | `dspy.ChainOfThought(ExtractPatterns)` | State persisted in Redis |
 | Agent dispatch | `dspy.ChainOfThought(SelectAgent)` | `call_agent()` cross-app invocation |
 | Agent reasoning | `dspy.RLM` + `dspy.CoT` + `dspy.Parallel` + `dspy.Refine` | `DurableAgent` shell + `@workflow_entry` |
 | Agent optimization | `BootstrapFewShot.compile()` on Explorer | `DaprFrontier` persistent state |

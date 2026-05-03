@@ -20,10 +20,10 @@ class ExtractPatterns(dspy.Signature):
 
 
 class SkillConsolidator:
-    """Uses DSPy ChainOfThought + Parallel to extract patterns from trajectories.
+    """Uses DSPy ChainOfThought to extract patterns from trajectories.
 
-    Trajectories are processed in parallel via dspy.Parallel, matching the
-    Trace2Skill paper's parallel multi-agent patch proposal (Stage 2).
+    Each trajectory is processed independently via ChainOfThought, matching the
+    Trace2Skill paper's parallel sub-agent approach.
     Can be optimized with BootstrapFewShot by providing labeled examples.
     """
 
@@ -31,7 +31,6 @@ class SkillConsolidator:
         self.dir = Path(persist_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self._extractor = dspy.ChainOfThought(ExtractPatterns)
-        self._parallel = dspy.Parallel(dspy.ChainOfThought(ExtractPatterns), n=4)
 
     def _build_trajectory_text(self, traj: dict) -> str:
         steps = traj if isinstance(traj, list) else traj.get("trajectory", [])
@@ -45,23 +44,15 @@ class SkillConsolidator:
         error_patterns = []
         success_patterns = []
 
-        texts = [self._build_trajectory_text(t) for t in trajectories]
-        texts = [t for t in texts if t.strip()]
-
-        if len(texts) >= 4:
-            predictions = self._parallel(trajectory_context=texts[:4])
-            if not isinstance(predictions, list):
-                predictions = [predictions]
-        else:
-            predictions = [self._extractor(trajectory_context=t) for t in texts]
-
-        for pred in predictions:
-            if pred is None:
+        for traj in trajectories:
+            text = self._build_trajectory_text(traj)
+            if not text.strip():
                 continue
+            pred = self._extractor(trajectory_context=text)
             if hasattr(pred, "error_patterns") and pred.error_patterns and len(pred.error_patterns) > 10:
-                error_patterns.append({"symptom": pred.error_patterns[:300], "extracted_by": "dspy.Parallel"})
+                error_patterns.append({"symptom": pred.error_patterns[:300], "extracted_by": "dspy.CoT"})
             if hasattr(pred, "success_patterns") and pred.success_patterns and len(pred.success_patterns) > 10:
-                success_patterns.append({"pattern": pred.success_patterns[:300], "extracted_by": "dspy.Parallel"})
+                success_patterns.append({"pattern": pred.success_patterns[:300], "extracted_by": "dspy.CoT"})
 
         for traj in trajectories[:5]:
             steps = traj if isinstance(traj, list) else traj.get("trajectory", [])
