@@ -1,12 +1,18 @@
 """
-CLI — start individual Dapr agents or run teacher/student distillation.
+CLI — run individual research agents, start the full research workflow,
+or run teacher/student distillation.
 
-Usage:
-    dapr run --app-id orchestrator --app-protocol grpc --app-port 8000 --resources-path ./resources -- \
-        python -m lab.10_dapr_deep_research --mode orchestrator
-    dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 --resources-path ./resources -- \
-        python -m lab.10_dapr_deep_research --mode explorer
-    python -m lab.10_dapr_deep_research --mode distill
+Usage (full distributed research, requires Dapr + Crawl4AI + Redis):
+    dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
+
+Usage (single agent in its own terminal):
+    dapr run --app-id orchestrator --app-protocol grpc --app-port 8000  \
+        --resources-path lab/10_dapr_deep_research/resources --          \
+        uv run python -m lab.10_dapr_deep_research --mode orchestrator
+
+Usage (quick tests, no infrastructure needed):
+    uv run python -m lab.10_dapr_deep_research --mode run
+    uv run python -m lab.10_dapr_deep_research --mode distill
 """
 
 from __future__ import annotations

@@ -91,61 +91,56 @@ ollama pull gemma4
 
 ## Running
 
-### Multi-app run (all 5 agents at once, from project root):
+Two paths depending on available infrastructure:
+
+### Path A: Full distributed research (Dapr + Crawl4AI + Redis)
+
+Requires `dapr init` completed and Docker running for Crawl4AI + Redis.
 
 ```bash
+# Terminal 1: infrastructure
+docker compose -f lab/10_dapr_deep_research/docker-compose.yml up -d
+
+# Terminal 2: launch all 5 agents at once
 dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
 ```
 
-Launches orchestrator (8000), explorer (8001), deepreader (8002), synthesizer (8003), critic (8004) with shared Redis state store and pub/sub.
+This starts the `ResearchWorkflow` orchestrator (port 8000) which:
+1. Seeds a research query into the `DaprFrontier` (Redis-backed)
+2. Each iteration selects the next direction via `SelectAgent` (DSPy CoT)
+3. Dispatches `ExplorerAgent` (port 8001), `DeepReaderAgent` (8002), `SynthesizerAgent` (8003), or `CriticAgent` (8004) via `call_agent()`
+4. Computes dynamic confidence deltas via `ComputeConfidenceDelta` (DSPy CoT)
+5. Checkpoints progress to Redis every 3 iterations — survives crashes
+6. Tracks LSE improvement trend across iterations
 
-### Individual agents (separate terminals, from project root):
-
-```bash
-dapr run --app-id orchestrator --app-protocol grpc --app-port 8000 \
-    --resources-path lab/10_dapr_deep_research/resources -- \
-    python -m lab.10_dapr_deep_research --mode orchestrator
-
-dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 \
-    --resources-path lab/10_dapr_deep_research/resources -- \
-    python -m lab.10_dapr_deep_research --mode explorer
-```
-
-### Programmatic (no Dapr sidecar, single process):
+### Path B: Quick test (no infrastructure needed)
 
 ```bash
-python -m lab.10_dapr_deep_research --mode run
+# Single-process UCB frontier demo (no Dapr, no Crawl4AI)
+uv run python -m lab.10_dapr_deep_research --mode run
+
+# Teacher/student distillation (requires Ollama + gemma4)
+uv run python -m lab.10_dapr_deep_research --mode distill
 ```
+
+The `--mode run` command exercises the UCB frontier loop in memory.
+The `--mode distill` compiles every DSPy program using teacher (DeepSeek) → student (Gemma 4).
 
 ## CLI Reference
 
 ```text
-usage: python -m lab.10_dapr_deep_research [-h] [--mode {orchestrator,explorer,deepreader,synthesizer,critic,run,distill}]
+usage: uv run python -m lab.10_dapr_deep_research [-h]
+       [--mode {orchestrator,explorer,deepreader,synthesizer,critic,run,distill}]
 
-Dapr Deep Research — multi-agent research platform
-
-options:
-  -h, --help            show this help message and exit
-  --mode {orchestrator,explorer,deepreader,synthesizer,critic,run,distill}
-                        orchestrator  — LSE-driven research orchestrator (port 8000)
-                        explorer     — direction discovery agent (port 8001)
-                        deepreader   — content extraction agent (port 8002)
-                        synthesizer  — cross-source synthesis agent (port 8003)
-                        critic       — quality evaluation agent (port 8004)
-                        run          — single-process demo (no Dapr sidecar)
-                        distill      — teacher/student compilation for all DSPy programs
+modes:
+  orchestrator  Start ResearchWorkflow on port 8000 (requires Dapr sidecar)
+  explorer      Start ExplorerAgent on port 8001 (requires Dapr sidecar)
+  deepreader    Start DeepReaderAgent on port 8002 (requires Dapr sidecar)
+  synthesizer   Start SynthesizerAgent on port 8003 (requires Dapr sidecar)
+  critic        Start CriticAgent on port 8004 (requires Dapr sidecar)
+  run           UCB frontier loop demo (no infrastructure needed)
+  distill       Teacher→Student compilation for all DSPy programs
 ```
-
-### Teacher/Student distillation:
-
-```bash
-python -m lab.10_dapr_deep_research --mode distill
-```
-
-Compiles every DSPy program (`ChainOfThought`, `Refine`, etc.) using
-`BootstrapFewShot` — teacher (DeepSeek) generates demonstrations, student
-(Gemma 4 via Ollama) learns from them. After compilation, all internal
-modules use the student LM at inference time.
 
 ## Key Features
 
