@@ -12,6 +12,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,11 +23,50 @@ from dspy.adapters.baml_adapter import BAMLAdapter
 from ..shared.config import get_lm_model, get_student_lm_model
 from .mcp.client import MCPClient
 from .mcp.bridge import MCPBridge
-from .memory.dapr_frontier import DaprFrontier
+from .memory.dapr_frontier import DaprFrontier, ResearchDirection
 from .evolution.lse import LSEOptimizer
 from .evolution.trace2skill import SkillConsolidator
 from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent
 from .orchestrator.workflow import ResearchWorkflow
+
+
+class _InMemoryFrontier:
+    """Dapr-free frontier for --mode run. Same UCB logic, no sidecar needed."""
+    def __init__(self):
+        self.directions: list[ResearchDirection] = []
+        self._total_explorations = 0
+
+    def seed_from_query(self, query: str):
+        self.directions.append(ResearchDirection(topic=query, confidence=0.0, exploration_depth=0, seed_query=query, last_updated=datetime.now(timezone.utc).isoformat()))
+
+    def seed_from_directions(self, topics: list[str], parent: str | None = None):
+        for t in topics:
+            if not any(d.topic == t for d in self.directions):
+                self.directions.append(ResearchDirection(topic=t, confidence=0.0, exploration_depth=0, parent_topic=parent, seed_query=t, last_updated=datetime.now(timezone.utc).isoformat()))
+
+    def next_action(self) -> ResearchDirection | None:
+        active = [d for d in self.directions if d.confidence < 0.95]
+        if not active:
+            return None
+        return max(active, key=lambda d: d.ucb_score(self._total_explorations))
+
+    def absorb_findings(self, topic: str, confidence_delta: float, sources: int, follow_ups: list[str]):
+        for d in self.directions:
+            if d.topic == topic:
+                d.confidence = min(1.0, d.confidence + confidence_delta)
+                d.exploration_depth += 1
+                d.source_count += sources
+                d.last_updated = datetime.now(timezone.utc).isoformat()
+                self._total_explorations += 1
+                break
+        for fu in follow_ups:
+            if not any(d.topic == fu for d in self.directions):
+                self.directions.append(ResearchDirection(topic=fu, confidence=0.0, exploration_depth=0, parent_topic=topic, seed_query=fu, last_updated=datetime.now(timezone.utc).isoformat()))
+
+    def summary(self) -> str:
+        active = len([d for d in self.directions if d.confidence < 0.95])
+        explored = len(self.directions) - active
+        return f"{active} active, {explored} explored, {self._total_explorations} total explorations"
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
@@ -83,10 +124,8 @@ def cmd_critic():
 
 
 def cmd_run():
-    """Single-process programmatic run (no Dapr sidecar needed for dev)."""
-    client = MCPClient(str(CONFIG_PATH))
-    client.connect_all()
-    frontier = DaprFrontier()
+    """Single-process programmatic run (no Dapr sidecar needed)."""
+    frontier = _InMemoryFrontier()
     print(f"Frontier: {frontier.summary()}")
     print("Running research loop programmatically...")
     query = "Research DSPy optimization patterns for LLM pipelines"
@@ -98,7 +137,6 @@ def cmd_run():
         print(f"  Iteration {i+1}: {direction.topic[:60]}")
         frontier.absorb_findings(direction.topic, 0.2, 1, [])
     print(f"Done. {frontier.summary()}")
-    client.close()
 
 
 def cmd_distill():
