@@ -10,34 +10,20 @@ from dotenv import load_dotenv
 import dspy
 from dspy.adapters.baml_adapter import BAMLAdapter
 from dapr_agents.agents.configs import AgentStateConfig
-from dapr_agents.storage.daprstores.stateservice import StateStoreService
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ..shared.config import get_lm_model, get_student_lm_model
+from ..shared.config import get_lm_model, get_student_lm_model, get_agent_port
 from .mcp.client import MCPClient
 from .mcp.bridge import MCPBridge
 from .memory.dapr_frontier import DaprFrontier
 from .memory.frontier import InMemoryFrontier
+from .memory.noop_store import NoopStore
 from .evolution.lse import LSEOptimizer
 from .evolution.trace2skill import SkillConsolidator
-from .agents.research_agents import (
-    ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent,
-    SelectAgent,
-)
+from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent, SelectAgent
 from .orchestrator.workflow import ResearchWorkflow
-
-
-class _NoopStore(StateStoreService):
-    def __init__(self):
-        self._data = {}
-
-    def load(self, *, key, default=None, state_metadata=None, return_model=False):
-        return self._data.get(key, default)
-
-    def save(self, *, key, value, etag=None, state_metadata=None, state_options=None, ttl_in_seconds=None):
-        self._data[key] = value
 
 
 console = Console()
@@ -55,6 +41,17 @@ def _get_bridge() -> MCPBridge:
     return MCPBridge(client, tool_defs)
 
 
+def _create_agents(bridge: MCPBridge, llm: dspy.LM) -> dict[str, ExplorerAgent | DeepReaderAgent | SynthesizerAgent | CriticAgent]:
+    noop = NoopStore()
+    state = AgentStateConfig(store=noop)
+    return {
+        "explorer": ExplorerAgent(bridge=bridge, llm=llm, state=state),
+        "deepreader": DeepReaderAgent(bridge=bridge, llm=llm, state=state),
+        "synthesizer": SynthesizerAgent(bridge=bridge, llm=llm, state=state),
+        "critic": CriticAgent(llm=llm, state=state),
+    }
+
+
 @click.group()
 @click.option("--query", "-q", default="", help="Research topic or question")
 @click.option("--iterations", "-i", default=5, show_default=True, help="Max research iterations")
@@ -64,7 +61,6 @@ def cli(ctx: click.Context, query: str, iterations: int):
     ctx.ensure_object(dict)
     ctx.obj["QUERY"] = query
     ctx.obj["ITERATIONS"] = iterations
-    ctx.obj["NOOP_STORE"] = _NoopStore()
     ctx.obj["DIRECT_LM"] = dspy.LM(get_lm_model())
 
 
@@ -78,49 +74,42 @@ def orchestrator(ctx: click.Context):
     from dapr_agents import AgentRunner
     runner = AgentRunner()
     query = ctx.obj.get("QUERY", "")
-    if query:
-        runner.serve(agent, port=8000, input={"query": query})
-    else:
-        runner.serve(agent, port=8000)
+    runner.serve(agent, port=get_agent_port("orchestrator"), input={"query": query})
 
 
 @cli.command()
 def explorer():
-    """Start ExplorerAgent on port 8001 (requires Dapr sidecar + Crawl4AI)."""
+    """Start ExplorerAgent (requires Dapr sidecar + Crawl4AI)."""
     bridge = _get_bridge()
     agent = ExplorerAgent(bridge=bridge)
     from dapr_agents import AgentRunner
-    runner = AgentRunner()
-    runner.serve(agent, port=8001)
+    AgentRunner().serve(agent, port=get_agent_port("explorer"))
 
 
 @cli.command()
 def deepreader():
-    """Start DeepReaderAgent on port 8002 (requires Dapr sidecar + Crawl4AI)."""
+    """Start DeepReaderAgent (requires Dapr sidecar + Crawl4AI)."""
     bridge = _get_bridge()
     agent = DeepReaderAgent(bridge=bridge)
     from dapr_agents import AgentRunner
-    runner = AgentRunner()
-    runner.serve(agent, port=8002)
+    AgentRunner().serve(agent, port=get_agent_port("deepreader"))
 
 
 @cli.command()
 def synthesizer():
-    """Start SynthesizerAgent on port 8003 (requires Dapr sidecar)."""
+    """Start SynthesizerAgent (requires Dapr sidecar)."""
     bridge = _get_bridge()
     agent = SynthesizerAgent(bridge=bridge)
     from dapr_agents import AgentRunner
-    runner = AgentRunner()
-    runner.serve(agent, port=8003)
+    AgentRunner().serve(agent, port=get_agent_port("synthesizer"))
 
 
 @cli.command()
 def critic():
-    """Start CriticAgent on port 8004 (requires Dapr sidecar)."""
+    """Start CriticAgent (requires Dapr sidecar)."""
     agent = CriticAgent()
     from dapr_agents import AgentRunner
-    runner = AgentRunner()
-    runner.serve(agent, port=8004)
+    AgentRunner().serve(agent, port=get_agent_port("critic"))
 
 
 @cli.command()
@@ -164,23 +153,20 @@ def mission(ctx: click.Context):
     console.print(f"  {len(tool_defs)} tool(s) discovered")
 
     console.print("\n[bold cyan][2/4][/] GFL optimization (BootstrapFewShot)...")
-    agents: list[tuple[str, ExplorerAgent | DeepReaderAgent | SynthesizerAgent | CriticAgent, list[dspy.Example]]] = [
-        ("Explorer", ExplorerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-         [dspy.Example(topic=query, hypotheses=["subtopic A"]).with_inputs("topic")]),
-        ("DeepReader", DeepReaderAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-         [dspy.Example(findings_summary="Finding X; Finding Y", validated_claims=["Claim X"], contradictions=[]).with_inputs("findings_summary")]),
-        ("Synthesizer", SynthesizerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-         [dspy.Example(task=query, synthesis="Cross-source analysis", key_insights=["Insight"], gaps=["Gap"]).with_inputs("task")]),
-        ("Critic", CriticAgent(llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-         [dspy.Example(research_summary=query, critique="Strengths: X. Weaknesses: Y.", improved_critique="Balanced critique.").with_inputs("research_summary", "critique")]),
-    ]
+    agents = _create_agents(bridge, ctx.obj["DIRECT_LM"])
+    agent_trainsets = {
+        "explorer": [dspy.Example(topic=query, hypotheses=["subtopic A"]).with_inputs("topic")],
+        "deepreader": [dspy.Example(findings_summary="Finding X; Finding Y", validated_claims=["Claim X"], contradictions=[]).with_inputs("findings_summary")],
+        "synthesizer": [dspy.Example(task=query, synthesis="Cross-source analysis", key_insights=["Insight"], gaps=["Gap"]).with_inputs("task")],
+        "critic": [dspy.Example(research_summary=query, critique="Strengths: X. Weaknesses: Y.", improved_critique="Balanced critique.").with_inputs("research_summary", "critique")],
+    }
     lse = LSEOptimizer()
     frontier = InMemoryFrontier()
     agent_selector = dspy.ChainOfThought(SelectAgent)
 
     compiled_count = 0
-    for name, agent, trainset in agents:
-        agent.compile(trainset)
+    for name, trainset in agent_trainsets.items():
+        agents[name].compile(trainset)
         compiled_count += 1
         console.print(f"  [green]\u2713[/] {name} compiled")
     console.print(f"  Compiled {compiled_count} module(s)")
@@ -224,13 +210,8 @@ def distill(ctx: click.Context):
     console.print(f"[dim]Student:[/] {get_student_lm_model()}")
 
     bridge = _get_bridge()
-    agents = [
-        ("Explorer", ExplorerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
-        ("DeepReader", DeepReaderAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
-        ("Synthesizer", SynthesizerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
-        ("Critic", CriticAgent(llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"]))),
-    ]
-    for name, agent in agents:
+    agents = _create_agents(bridge, ctx.obj["DIRECT_LM"])
+    for name, agent in agents.items():
         with console.status(f"Compiling {name}..."):
             agent.compile([dspy.Example(topic="test", hypotheses=["test"]).with_inputs("topic")], student_lm=student_lm)
         console.print(f"  [green]\u2713[/] {name} compiled")
@@ -311,18 +292,9 @@ def chat(ctx: click.Context):
                         console.print(f"  Current: {max_iter}")
                 case "/compile":
                     if bridge:
-                        agents_data = [
-                            (ExplorerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-                             [dspy.Example(topic="research", hypotheses=["subtopic"]).with_inputs("topic")]),
-                            (DeepReaderAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-                             [dspy.Example(findings_summary="finding", validated_claims=["claim"], contradictions=[]).with_inputs("findings_summary")]),
-                            (SynthesizerAgent(bridge=bridge, llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-                             [dspy.Example(task="research", synthesis="synthesis", key_insights=["insight"], gaps=["gap"]).with_inputs("task")]),
-                            (CriticAgent(llm=ctx.obj["DIRECT_LM"], state=AgentStateConfig(store=ctx.obj["NOOP_STORE"])),
-                             [dspy.Example(research_summary="research", critique="critique", improved_critique="improved").with_inputs("research_summary", "critique")]),
-                        ]
-                        for agent, trainset in agents_data:
-                            agent.compile(trainset)
+                        chat_agents = _create_agents(bridge, ctx.obj["DIRECT_LM"])
+                        for agent in chat_agents.values():
+                            agent.compile([dspy.Example(topic="research", hypotheses=["subtopic"]).with_inputs("topic")])
                         agents_compiled = True
                         console.print("  [green]Agents compiled[/]")
                     else:

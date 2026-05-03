@@ -42,6 +42,18 @@ def get_lm_temperature(default: float = 0.3) -> float:
         return default
 
 
+def get_agent_port(agent_name: str = "orchestrator") -> int:
+    return {"orchestrator": 8000, "explorer": 8001, "deepreader": 8002, "synthesizer": 8003, "critic": 8004}.get(agent_name, 8000)
+
+def get_dapr_state_store() -> str:
+    return os.getenv("DAPR_STATE_STORE", "research-state")
+
+def get_dapr_pubsub() -> str:
+    return os.getenv("DAPR_PUBSUB", "research-pubsub")
+
+def get_dapr_llm_provider() -> str:
+    return os.getenv("DAPR_LLM_PROVIDER", "llm-provider")
+
 def project_root() -> Path:
     """Return the absolute path to the project root (parent of lab/)."""
     return Path(__file__).resolve().parent.parent.parent

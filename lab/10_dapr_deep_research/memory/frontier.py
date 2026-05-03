@@ -1,4 +1,4 @@
-"""In-memory frontier for single-process use. Same UCB logic as DaprFrontier, no sidecar."""
+"""In-memory frontier. Same UCB logic as DaprFrontier, no sidecar."""
 
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ class InMemoryFrontier:
     def __init__(self):
         self.directions: list[ResearchDirection] = []
         self._total_explorations = 0
+        self._active_count = 0
 
     @property
     def total_explorations(self) -> int:
@@ -43,11 +44,13 @@ class InMemoryFrontier:
 
     def seed_from_query(self, query: str):
         self.directions.append(ResearchDirection(topic=query, confidence=0.0, exploration_depth=0, seed_query=query, last_updated=datetime.now(timezone.utc).isoformat()))
+        self._active_count += 1
 
     def seed_from_directions(self, topics: list[str], parent: str | None = None):
         for t in topics:
             if not any(d.topic == t for d in self.directions):
                 self.directions.append(ResearchDirection(topic=t, confidence=0.0, exploration_depth=0, parent_topic=parent, seed_query=t, last_updated=datetime.now(timezone.utc).isoformat()))
+                self._active_count += 1
 
     def next_action(self) -> ResearchDirection | None:
         active = [d for d in self.directions if d.confidence < 0.95]
@@ -65,11 +68,10 @@ class InMemoryFrontier:
         for fu in follow_ups:
             if not any(d.topic == fu for d in self.directions):
                 self.directions.append(ResearchDirection(topic=fu, confidence=0.0, exploration_depth=0, parent_topic=topic, seed_query=fu, last_updated=datetime.now(timezone.utc).isoformat()))
+                self._active_count += 1
 
     def saturated(self) -> bool:
         return all(d.confidence >= 0.95 for d in self.directions)
 
     def summary(self) -> str:
-        active = len([d for d in self.directions if d.confidence < 0.95])
-        explored = len(self.directions) - active
-        return f"{active} active, {explored} explored, {self._total_explorations} total explorations"
+        return f"{self._active_count} active, {len(self.directions) - self._active_count} explored, {self._total_explorations} total explorations"
