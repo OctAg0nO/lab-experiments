@@ -19,6 +19,8 @@ from dapr_agents.workflow.utils.core import call_agent
 
 import dspy
 
+from lab.shared.config import get_dapr_state_store
+from lab.shared.research import SATURATION_THRESHOLD, MAX_BOOTSTRAPPED_DEMOS, MAX_LABELED_DEMOS
 from ..evolution.lse import LSEOptimizer
 from ..memory.dapr_frontier import DaprFrontier
 from ..agents.research_agents import SelectAgent, ComputeConfidenceDelta
@@ -53,7 +55,7 @@ class ResearchWorkflow(DurableAgent):
                 "Consolidate findings into actionable knowledge",
             ],
             llm=DaprChatClient(component_name="llm-provider"),
-            state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
+            state=AgentStateConfig(store=StateStoreService(store_name=get_dapr_state_store())),
             execution=AgentExecutionConfig(
                 max_iterations=30,
             ),
@@ -74,7 +76,7 @@ class ResearchWorkflow(DurableAgent):
                 if name == "_agent_selector" else
                 (lambda _ex, pred, _trace: hasattr(pred, "confidence_delta") and 0.0 <= pred.confidence_delta <= 0.5)
             )
-            bs = dspy.BootstrapFewShot(metric=metric_fn, max_bootstrapped_demos=4, max_labeled_demos=2)
+            bs = dspy.BootstrapFewShot(metric=metric_fn, max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS, max_labeled_demos=MAX_LABELED_DEMOS)
             compiled = bs.compile(student, teacher=teacher, trainset=trainset)
             if student_lm:
                 compiled.set_lm(student_lm)
@@ -137,12 +139,13 @@ class ResearchWorkflow(DurableAgent):
                 yield ctx.set_state("heartbeat_frontier", self.frontier.summary())
                 yield ctx.set_state("heartbeat_findings_count", len(self.all_findings))
 
+            directions = list(self.frontier.directions.values())
             state = {
-                "num_directions": len(self.frontier.directions),
+                "num_directions": len(directions),
                 "num_findings": len(self.all_findings),
                 "frontier_saturation": 1.0 - (
-                    len([d for d in self.frontier.directions if d.confidence < 0.95])
-                    / max(1, len(self.frontier.directions))
+                    len([d for d in directions if not d.is_saturated(SATURATION_THRESHOLD)])
+                    / max(1, len(directions))
                 ),
             }
             self.lse.record_run(f"iter_{iteration}", state, topic)

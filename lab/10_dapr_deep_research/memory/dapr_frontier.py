@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
-import math
-from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Dict, Optional, Set
 
 import dspy
 from dapr_agents.storage.daprstores.stateservice import StateStoreService
+
+from lab.shared.config import get_dapr_state_store
+from lab.shared.research import (
+    ResearchDirection,
+    ResearchFrontier,
+    MAX_BOOTSTRAPPED_DEMOS,
+    MAX_LABELED_DEMOS,
+)
 
 
 class AssessBatchSaturation(dspy.Signature):
@@ -17,107 +24,149 @@ class AssessBatchSaturation(dspy.Signature):
     saturated_indices: list[int] = dspy.OutputField(desc="Indices of saturated directions")
 
 
-@dataclass
-class ResearchDirection:
-    topic: str
-    confidence: float = 0.0
-    exploration_depth: int = 0
-    source_count: int = 0
-    last_updated: str = ""
-    parent_topic: str | None = None
-    seed_query: str = ""
-
-    def ucb_score(self, total_explorations: int, exploration_constant: float = 1.4) -> float:
-        if self.exploration_depth == 0:
-            return float("inf")
-        return self.confidence + exploration_constant * math.sqrt(
-            math.log(total_explorations + 1) / (self.exploration_depth + 1)
-        )
-
-    def to_dict(self) -> dict:
-        return {"topic": self.topic, "confidence": self.confidence, "exploration_depth": self.exploration_depth, "source_count": self.source_count, "last_updated": self.last_updated, "parent_topic": self.parent_topic, "seed_query": self.seed_query}
-
-    @classmethod
-    def from_dict(cls, d: dict) -> ResearchDirection:
-        return cls(**d)
-
-
-class DaprFrontier:
-    def __init__(self, store_name: str = "research-state", key: str = "frontier"):
-        self._store = StateStoreService(store_name=store_name)
+class DaprFrontier(ResearchFrontier):
+    def __init__(self, store_name: str | None = None, key: str = "frontier"):
+        self._store = StateStoreService(store_name=store_name or get_dapr_state_store())
         self._key = key
-        self.directions: list[ResearchDirection] = []
-        self._total_explorations = 0
-        self._active_count = 0
+        self.directions: Dict[str, ResearchDirection] = {}
+        self.total_explorations = 0
         self._saturation_batch = dspy.ChainOfThought(AssessBatchSaturation)
+        self._saturation_cache: Optional[Set[int]] = None
         self._load()
 
-    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
-        teacher = self._saturation_batch
-        student = dspy.ChainOfThought(AssessBatchSaturation) if student_lm else teacher
-        if student_lm:
-            student.set_lm(student_lm)
-        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "saturated_indices"), max_bootstrapped_demos=4, max_labeled_demos=2)
-        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
-        if student_lm:
-            compiled.set_lm(student_lm)
-        self._saturation_batch = compiled
+    def _invalidate_saturation_cache(self):
+        self._saturation_cache = None
+
+    # -- serialization --
+
+    def _to_snapshot(self) -> list[dict]:
+        return [d.to_dict() for d in self.directions.values()]
+
+    @staticmethod
+    def _from_snapshot(snapshot: list[dict]) -> Dict[str, ResearchDirection]:
+        return {d["topic"]: ResearchDirection.from_dict(d) for d in snapshot}
+
+    # -- persistence --
 
     def _load(self):
         raw = self._store.load(key=self._key)
         if raw:
             data = raw if isinstance(raw, dict) else {}
-            self.directions = [ResearchDirection.from_dict(d) for d in data.get("directions", [])]
-            self._total_explorations = data.get("total_explorations", 0)
+            self.directions = self._from_snapshot(data.get("directions", []))
+            self.total_explorations = data.get("total_explorations", 0)
 
     def _save(self):
-        self._store.save(key=self._key, value={"directions": [d.to_dict() for d in self.directions], "total_explorations": self._total_explorations})
+        self._store.save(
+            key=self._key,
+            value={
+                "directions": self._to_snapshot(),
+                "total_explorations": self.total_explorations,
+            },
+        )
 
-    @property
-    def total_explorations(self) -> int:
-        return self._total_explorations
+    # -- research operations --
 
     def seed_from_query(self, query: str):
-        self.directions.append(ResearchDirection(topic=query, confidence=0.0, exploration_depth=0, seed_query=query, last_updated=datetime.now(timezone.utc).isoformat()))
-        self._active_count += 1
+        self.directions[query] = ResearchDirection(
+            topic=query,
+            confidence=0.0,
+            exploration_depth=0,
+            seed_query=query,
+            last_updated=datetime.now(timezone.utc).isoformat(),
+        )
+        self._invalidate_saturation_cache()
         self._save()
 
     def seed_from_directions(self, topics: list[str], parent: str | None = None):
         for t in topics:
-            if not any(d.topic == t for d in self.directions):
-                self.directions.append(ResearchDirection(topic=t, confidence=0.0, exploration_depth=0, parent_topic=parent, seed_query=t, last_updated=datetime.now(timezone.utc).isoformat()))
-                self._active_count += 1
+            if t not in self.directions:
+                self.directions[t] = ResearchDirection(
+                    topic=t,
+                    confidence=0.0,
+                    exploration_depth=0,
+                    parent_topic=parent,
+                    seed_query=t,
+                    last_updated=datetime.now(timezone.utc).isoformat(),
+                )
+        self._invalidate_saturation_cache()
         self._save()
 
-    def _saturated_indices(self) -> set[int]:
-        if not self.directions:
-            return set()
-        snapshot = [{"topic": d.topic, "confidence": d.confidence, "exploration_depth": d.exploration_depth, "source_count": d.source_count} for d in self.directions]
-        pred = self._saturation_batch(directions_json=json.dumps(snapshot))
-        return set(pred.saturated_indices) if hasattr(pred, "saturated_indices") else set()
+    def next_action(self) -> Optional[ResearchDirection]:
+        saturated = self._get_saturated_indices()
+        sorted_dirs = list(self.directions.values())
+        candidates = [d for i, d in enumerate(sorted_dirs) if i not in saturated]
+        return self._next_action_from_directions(candidates)
 
-    def next_action(self) -> ResearchDirection | None:
-        saturated = self._saturated_indices()
-        candidates = [d for i, d in enumerate(self.directions) if i not in saturated]
-        return max(candidates, key=lambda d: d.ucb_score(self._total_explorations)) if candidates else None
-
-    def absorb_findings(self, topic: str, confidence_delta: float, sources: int, follow_ups: list[str]):
-        for d in self.directions:
-            if d.topic == topic:
-                d.confidence = min(1.0, d.confidence + confidence_delta)
-                d.exploration_depth += 1
-                d.source_count += sources
-                d.last_updated = datetime.now(timezone.utc).isoformat()
-                self._total_explorations += 1
-                break
+    def absorb_findings(
+        self, topic: str, confidence_delta: float, sources: int, follow_ups: list[str]
+    ):
+        d = self.directions.get(topic)
+        if d is not None:
+            d.confidence = min(1.0, d.confidence + confidence_delta)
+            d.exploration_depth += 1
+            d.source_count += sources
+            d.last_updated = datetime.now(timezone.utc).isoformat()
+            self.total_explorations += 1
         for fu in follow_ups:
-            if not any(d.topic == fu for d in self.directions):
-                self.directions.append(ResearchDirection(topic=fu, confidence=0.0, exploration_depth=0, parent_topic=topic, seed_query=fu, last_updated=datetime.now(timezone.utc).isoformat()))
-                self._active_count += 1
+            if fu not in self.directions:
+                self.directions[fu] = ResearchDirection(
+                    topic=fu,
+                    confidence=0.0,
+                    exploration_depth=0,
+                    parent_topic=topic,
+                    seed_query=fu,
+                    last_updated=datetime.now(timezone.utc).isoformat(),
+                )
+        self._invalidate_saturation_cache()
         self._save()
 
     def saturated(self) -> bool:
-        return len(self._saturated_indices()) == len(self.directions) if self.directions else False
+        saturated = self._get_saturated_indices()
+        return len(saturated) == len(self.directions) if self.directions else False
 
     def summary(self) -> str:
-        return f"{self._active_count} active, {len(self.directions) - self._active_count} explored, {self._total_explorations} total explorations"
+        total = len(self.directions)
+        active = self._active_count()
+        return f"{active} active, {total - active} explored, {self.total_explorations} total explorations"
+
+    # -- saturation (Dapr-specific) --
+
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        teacher = self._saturation_batch
+        if student_lm:
+            student = dspy.ChainOfThought(AssessBatchSaturation)
+            student.set_lm(student_lm)
+        else:
+            student = teacher
+
+        def _saturation_metric(ex, pred, trace=None):
+            return hasattr(pred, "saturated_indices")
+
+        bs = dspy.BootstrapFewShot(
+            metric=_saturation_metric,
+            max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
+            max_labeled_demos=MAX_LABELED_DEMOS,
+        )
+        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+        if student_lm:
+            compiled.set_lm(student_lm)
+        self._saturation_batch = compiled
+
+    def _get_saturated_indices(self) -> Set[int]:
+        if self._saturation_cache is not None:
+            return self._saturation_cache
+        if not self.directions:
+            self._saturation_cache = set()
+            return self._saturation_cache
+        snapshot = [
+            {
+                "topic": d.topic,
+                "confidence": d.confidence,
+                "exploration_depth": d.exploration_depth,
+                "source_count": d.source_count,
+            }
+            for d in self.directions.values()
+        ]
+        pred = self._saturation_batch(directions_json=json.dumps(snapshot))
+        self._saturation_cache = set(pred.saturated_indices) if hasattr(pred, "saturated_indices") else set()
+        return self._saturation_cache

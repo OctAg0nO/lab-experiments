@@ -8,22 +8,6 @@ from pathlib import Path
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 
-def get_env_or_raise(key: str) -> str:
-    """Get an env var or raise a clear error."""
-    value = os.getenv(key)
-    if not value:
-        raise ValueError(
-            f"Missing {key}. Set it in the project root .env file "
-            f"or export it in your shell."
-        )
-    return value
-
-
-def get_env(key: str, default: str = "") -> str:
-    """Get an env var with a fallback default."""
-    return os.getenv(key, default)
-
-
 def get_lm_model(default: str = "deepseek/deepseek-v4-flash") -> str:
     """Get the primary LLM model identifier from env."""
     return os.getenv("LLM_MODEL", default)

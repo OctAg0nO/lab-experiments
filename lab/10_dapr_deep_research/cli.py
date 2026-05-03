@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ..shared.config import get_lm_model, get_student_lm_model, get_agent_port
+from ..shared.config import get_lm_model, get_student_lm_model, get_lm_temperature, get_agent_port
 from .mcp.client import MCPClient
 from .mcp.bridge import MCPBridge
 from .memory.dapr_frontier import DaprFrontier
@@ -32,7 +32,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config" / "mcp_servers.json"
 
-dspy.configure(lm=dspy.LM(get_lm_model()), adapter=BAMLAdapter())
+dspy.configure(lm=dspy.LM(get_lm_model(), temperature=get_lm_temperature()), adapter=BAMLAdapter())
 
 
 def _get_bridge() -> MCPBridge:
@@ -61,7 +61,7 @@ def cli(ctx: click.Context, query: str, iterations: int):
     ctx.ensure_object(dict)
     ctx.obj["QUERY"] = query
     ctx.obj["ITERATIONS"] = iterations
-    ctx.obj["DIRECT_LM"] = dspy.LM(get_lm_model())
+    ctx.obj["DIRECT_LM"] = dspy.LM(get_lm_model(), temperature=get_lm_temperature())
 
 
 @cli.command()
@@ -77,39 +77,26 @@ def orchestrator(ctx: click.Context):
     runner.serve(agent, port=get_agent_port("orchestrator"), input={"query": query})
 
 
-@cli.command()
-def explorer():
-    """Start ExplorerAgent (requires Dapr sidecar + Crawl4AI)."""
-    bridge = _get_bridge()
-    agent = ExplorerAgent(bridge=bridge)
-    from dapr_agents import AgentRunner
-    AgentRunner().serve(agent, port=get_agent_port("explorer"))
+_DAPR_COMMANDS: list[tuple[str, str, type[ExplorerAgent | DeepReaderAgent | SynthesizerAgent | CriticAgent], bool]] = [
+    ("explorer", "ExplorerAgent (requires Dapr sidecar + Crawl4AI)", ExplorerAgent, True),
+    ("deepreader", "DeepReaderAgent (requires Dapr sidecar + Crawl4AI)", DeepReaderAgent, True),
+    ("synthesizer", "SynthesizerAgent (requires Dapr sidecar)", SynthesizerAgent, True),
+    ("critic", "CriticAgent (requires Dapr sidecar)", CriticAgent, False),
+]
 
 
-@cli.command()
-def deepreader():
-    """Start DeepReaderAgent (requires Dapr sidecar + Crawl4AI)."""
-    bridge = _get_bridge()
-    agent = DeepReaderAgent(bridge=bridge)
-    from dapr_agents import AgentRunner
-    AgentRunner().serve(agent, port=get_agent_port("deepreader"))
+def _make_dapr_cmd(name: str, agent_cls: type, needs_bridge: bool):
+    @cli.command(name=name)
+    def cmd():
+        agent = agent_cls(bridge=_get_bridge()) if needs_bridge else agent_cls()
+        from dapr_agents import AgentRunner
+        AgentRunner().serve(agent, port=get_agent_port(name))
+    cmd.__doc__ = f"Start {name} on port {get_agent_port(name)}."
+    return cmd
 
 
-@cli.command()
-def synthesizer():
-    """Start SynthesizerAgent (requires Dapr sidecar)."""
-    bridge = _get_bridge()
-    agent = SynthesizerAgent(bridge=bridge)
-    from dapr_agents import AgentRunner
-    AgentRunner().serve(agent, port=get_agent_port("synthesizer"))
-
-
-@cli.command()
-def critic():
-    """Start CriticAgent (requires Dapr sidecar)."""
-    agent = CriticAgent()
-    from dapr_agents import AgentRunner
-    AgentRunner().serve(agent, port=get_agent_port("critic"))
+for _name, _doc, _cls, _needs_bridge in _DAPR_COMMANDS:
+    _make_dapr_cmd(_name, _cls, _needs_bridge)
 
 
 @cli.command()
@@ -125,7 +112,7 @@ def run(ctx: click.Context):
             direction = frontier.next_action()
             if not direction:
                 break
-            selection = agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
+            agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
             frontier.absorb_findings(direction.topic, 0.2, 1, [])
     table = Table(title="Research Loop", header_style="bold cyan")
     table.add_column("Iter", style="dim")
@@ -177,14 +164,27 @@ def mission(ctx: click.Context):
         direction = frontier.next_action()
         if not direction:
             break
-        selection = agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
+        agent_selector(exploration_depth=direction.exploration_depth, confidence=direction.confidence, topic=direction.topic)
         frontier.absorb_findings(direction.topic, 0.2, 1, [])
         state = {"num_directions": len(frontier.directions), "num_findings": i + 1, "frontier_saturation": 0.0}
         lse.record_run(f"iter_{i+1}", state, direction.topic)
 
     console.print("\n[bold cyan][4/4][/] Consolidating...")
     consolidator = SkillConsolidator(BASE_DIR / "memory" / "skills")
-    consolidator.save_skill(f"mission_{datetime.now().strftime('%Y%m%d_%H%M%S')}", {"n_trajectories": len(lse.runs), "success_patterns": [], "error_patterns": []})
+    trajectories: list[dict] = []
+    for run in lse.runs:
+        trajectories.append({
+            "trajectory": [{
+                "reasoning": f"Select agent for direction based on frontier state (depth={run.num_findings}, quality={run.quality_score:.2f})",
+                "code": f"frontier.next_action() -> absorb_findings({run.strategy_description[:100]})",
+                "output": f"quality_score={run.quality_score:.2f}, directions explored={run.num_directions}",
+            }],
+        })
+    patterns = consolidator.consolidate(trajectories)
+    skill_name = f"mission_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    consolidator.save_skill(skill_name, patterns)
+    console.print(f"  [green]\u2713[/] {len(patterns['error_patterns'])} error patterns, {len(patterns['success_patterns'])} success patterns")
+    console.print(f"  [dim]Saved skill:[/] {skill_name}")
 
     summary = Table.grid(padding=(0, 2))
     summary.add_column(style="bold cyan")
@@ -224,7 +224,6 @@ def chat(ctx: click.Context):
     """Interactive research REPL. Type queries or /commands."""
     console.print(Panel("[bold]Interactive Research Chat[/]\nType a research query or /help for commands.", style="cyan"))
 
-    import shutil
 
     frontier = InMemoryFrontier()
     lse = LSEOptimizer()
@@ -278,7 +277,7 @@ def chat(ctx: click.Context):
                     table.add_column("Confidence")
                     table.add_column("Depth")
                     table.add_column("Sources")
-                    for d in frontier.directions:
+                    for d in frontier.directions.values():
                         table.add_row(d.topic[:50], f"{d.confidence:.2f}", str(d.exploration_depth), str(d.source_count))
                     console.print(table)
                 case "/history":

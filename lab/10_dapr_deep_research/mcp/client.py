@@ -87,20 +87,11 @@ class MCPClient:
         return "\n".join(parts)
 
     def close(self):
-        if not self._servers:
-            self._loop.call_soon_threadsafe(self._loop.stop)
-            self._thread.join(timeout=2)
-            return
-        async def _cleanup():
-            for ctx in self._servers.values():
-                try:
+        if self._servers:
+            async def _cleanup():
+                for ctx in self._servers.values():
                     await ctx.close_coro
-                except Exception:
-                    pass
-        try:
             self._run(_cleanup())
-        except Exception:
-            pass
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=2)
 

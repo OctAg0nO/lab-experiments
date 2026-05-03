@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 import dspy
 
+from lab.shared.research import MAX_BOOTSTRAPPED_DEMOS, MAX_LABELED_DEMOS
+
 
 class QualityEvaluation(dspy.Signature):
     """Evaluate research iteration quality based on coverage, depth, and novelty."""
@@ -49,7 +51,7 @@ class LSEOptimizer:
             student.set_lm(student_lm)
         bs = dspy.BootstrapFewShot(
             metric=lambda _ex, pred, _trace: hasattr(pred, "quality_score") and 0.0 <= pred.quality_score <= 1.0,
-            max_bootstrapped_demos=4, max_labeled_demos=2,
+            max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS, max_labeled_demos=MAX_LABELED_DEMOS,
         )
         compiled = bs.compile(student, teacher=teacher, trainset=trainset)
         if student_lm:

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import dspy
 
+from lab.shared.research import MAX_BOOTSTRAPPED_DEMOS, MAX_LABELED_DEMOS
+
 
 class ExtractPatterns(dspy.Signature):
     """Extract reusable reasoning patterns from an execution trajectory."""
@@ -39,7 +41,7 @@ class SkillConsolidator:
             student.set_lm(student_lm)
         bs = dspy.BootstrapFewShot(
             metric=lambda _ex, pred, _trace: hasattr(pred, "error_patterns") and len(pred.error_patterns) > 10,
-            max_bootstrapped_demos=4, max_labeled_demos=2,
+            max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS, max_labeled_demos=MAX_LABELED_DEMOS,
         )
         compiled = bs.compile(student, teacher=teacher, trainset=trainset)
         if student_lm:

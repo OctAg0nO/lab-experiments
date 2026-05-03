@@ -16,6 +16,8 @@ from dapr_agents.agents.configs import (
 from dapr_agents.storage.daprstores.stateservice import StateStoreService
 from dapr_agents.workflow import workflow_entry
 
+from lab.shared.config import get_dapr_state_store
+from lab.shared.research import MAX_BOOTSTRAPPED_DEMOS, MAX_LABELED_DEMOS
 from ..mcp.bridge import MCPBridge
 
 # ---------------------------------------------------------------------------
@@ -128,7 +130,7 @@ class ExplorerAgent(DurableAgent):
             instructions=["Identify unexplored angles", "Return diverse directions", "Be specific"],
             llm=llm or DaprChatClient(component_name="llm-provider"),
             tools=bridge.get_agent_tools(),
-            state=state or AgentStateConfig(store=StateStoreService(store_name="research-state")),
+            state=state or AgentStateConfig(store=StateStoreService(store_name=get_dapr_state_store())),
             execution=AgentExecutionConfig(max_iterations=10, tool_execution_mode=ToolExecutionMode.PARALLEL),
             **kwargs,
         )
@@ -138,7 +140,7 @@ class ExplorerAgent(DurableAgent):
         student = dspy.ChainOfThought(GenerateHypotheses) if student_lm else teacher
         if student_lm:
             student.set_lm(student_lm)
-        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: len(pred.hypotheses) > 0, max_bootstrapped_demos=4, max_labeled_demos=2)
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: len(pred.hypotheses) > 0, max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS, max_labeled_demos=MAX_LABELED_DEMOS)
         compiled = bs.compile(student, teacher=teacher, trainset=trainset)
         if student_lm:
             compiled.set_lm(student_lm)
@@ -175,7 +177,7 @@ class DeepReaderAgent(DurableAgent):
             instructions=["Read thoroughly", "Extract specific claims with evidence", "Rate confidence"],
             llm=llm or DaprChatClient(component_name="llm-provider"),
             tools=bridge.get_agent_tools(),
-            state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
+            state=AgentStateConfig(store=StateStoreService(store_name=get_dapr_state_store())),
             execution=AgentExecutionConfig(max_iterations=10, tool_execution_mode=ToolExecutionMode.PARALLEL),
             **kwargs,
         )
@@ -185,7 +187,7 @@ class DeepReaderAgent(DurableAgent):
         student = dspy.ChainOfThought(CrossValidateFindings) if student_lm else teacher
         if student_lm:
             student.set_lm(student_lm)
-        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "validated_claims") and len(pred.validated_claims) > 0, max_bootstrapped_demos=4, max_labeled_demos=2)
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "validated_claims") and len(pred.validated_claims) > 0, max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS, max_labeled_demos=MAX_LABELED_DEMOS)
         compiled = bs.compile(student, teacher=teacher, trainset=trainset)
         if student_lm:
             compiled.set_lm(student_lm)
@@ -223,7 +225,7 @@ class SynthesizerAgent(DurableAgent):
             instructions=["Identify patterns", "Highlight contradictions", "Suggest gaps"],
             llm=llm or DaprChatClient(component_name="llm-provider"),
             tools=bridge.get_agent_tools(),
-            state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
+            state=AgentStateConfig(store=StateStoreService(store_name=get_dapr_state_store())),
             execution=AgentExecutionConfig(max_iterations=8, tool_execution_mode=ToolExecutionMode.PARALLEL),
             **kwargs,
         )
@@ -233,7 +235,7 @@ class SynthesizerAgent(DurableAgent):
         student = dspy.ChainOfThought(SynthesizeAcrossSources) if student_lm else teacher
         if student_lm:
             student.set_lm(student_lm)
-        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "synthesis") and len(pred.synthesis) > 50, max_bootstrapped_demos=4, max_labeled_demos=2)
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "synthesis") and len(pred.synthesis) > 50, max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS, max_labeled_demos=MAX_LABELED_DEMOS)
         compiled = bs.compile(student, teacher=teacher, trainset=trainset)
         if student_lm:
             compiled.set_lm(student_lm)
@@ -269,7 +271,7 @@ class CriticAgent(DurableAgent):
             goal="Evaluate research quality and find gaps",
             instructions=["Be critical but constructive", "Identify missing angles", "Prioritize follow-ups"],
             llm=llm or DaprChatClient(component_name="llm-provider"),
-            state=AgentStateConfig(store=StateStoreService(store_name="research-state")),
+            state=AgentStateConfig(store=StateStoreService(store_name=get_dapr_state_store())),
             execution=AgentExecutionConfig(max_iterations=6),
             **kwargs,
         )
@@ -282,7 +284,7 @@ class CriticAgent(DurableAgent):
             student = dspy.Refine(inner, N=3, reward_fn=lambda _, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
         else:
             student = teacher
-        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "improved_critique") and len(pred.improved_critique) > 100, max_bootstrapped_demos=4, max_labeled_demos=2)
+        bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "improved_critique") and len(pred.improved_critique) > 100, max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS, max_labeled_demos=MAX_LABELED_DEMOS)
         compiled = bs.compile(student, teacher=teacher, trainset=trainset)
         if student_lm:
             compiled.set_lm(student_lm)
