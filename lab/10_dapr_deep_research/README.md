@@ -117,6 +117,25 @@ dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 \
 python -m lab.10_dapr_deep_research --mode run
 ```
 
+## CLI Reference
+
+```text
+usage: python -m lab.10_dapr_deep_research [-h] [--mode {orchestrator,explorer,deepreader,synthesizer,critic,run,distill}]
+
+Dapr Deep Research — multi-agent research platform
+
+options:
+  -h, --help            show this help message and exit
+  --mode {orchestrator,explorer,deepreader,synthesizer,critic,run,distill}
+                        orchestrator  — LSE-driven research orchestrator (port 8000)
+                        explorer     — direction discovery agent (port 8001)
+                        deepreader   — content extraction agent (port 8002)
+                        synthesizer  — cross-source synthesis agent (port 8003)
+                        critic       — quality evaluation agent (port 8004)
+                        run          — single-process demo (no Dapr sidecar)
+                        distill      — teacher/student compilation for all DSPy programs
+```
+
 ### Teacher/Student distillation:
 
 ```bash
