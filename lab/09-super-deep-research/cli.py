@@ -110,8 +110,9 @@ def cmd_list_frontier():
         return
     print(f"{'TOPIC':50s} {'CONF':6s} {'DEPTH':6s} {'UCB':6s}")
     print("-" * 70)
-    for d in sorted(frontier.directions, key=lambda x: x.ucb_score(frontier._total_explorations), reverse=True):
-        ucb = d.ucb_score(frontier._total_explorations)
+    total_exp = frontier.total_explorations
+    for d in sorted(frontier.directions, key=lambda x: x.ucb_score(total_exp), reverse=True):
+        ucb = d.ucb_score(total_exp)
         ucb_str = "∞" if ucb == float("inf") else f"{ucb:.2f}"
         print(f"{d.topic[:48]:50s} {d.confidence:.2f}  {d.exploration_depth:6d} {ucb_str:6s}")
 
@@ -255,8 +256,8 @@ def _handle_slash_command(cmd: str, memory, frontier, client, tool_defs, lm, max
             if memory_dir.exists():
                 shutil.rmtree(memory_dir)
                 memory_dir.mkdir(parents=True)
-                memory = MemoryStore(memory.base)
-                frontier = ResearchFrontier(persist_path=str(Path(memory.base) / "frontier.json"))
+                memory.__init__(memory.base)
+                frontier.__init__(persist_path=str(Path(memory.base) / "frontier.json"))
                 print("  Memory reset.")
         case "/quit":
             sys.exit(0)

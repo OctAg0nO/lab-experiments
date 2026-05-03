@@ -36,10 +36,8 @@ class LSEOptimizer:
     def __init__(
         self,
         quality_fn: Callable[[Any], float],
-        exploration_constant: float = 1.0,
     ):
         self.quality_fn = quality_fn
-        self.exploration_constant = exploration_constant
         self.runs: list[LSERun] = []
 
     def compute_improvement(self, current_quality: float) -> float:

@@ -132,6 +132,10 @@ class ResearchFrontier:
                 ))
         self._save()
 
+    @property
+    def total_explorations(self) -> int:
+        return self._total_explorations
+
     def saturated(self) -> bool:
         """All active directions have high confidence."""
         active = [d for d in self.directions if d.confidence < 0.95]

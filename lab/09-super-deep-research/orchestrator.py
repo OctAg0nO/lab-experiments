@@ -15,7 +15,6 @@ from .frontier import ResearchFrontier
 from .memory.store import MemoryStore
 from .evolution.lse import LSEOptimizer
 from .evolution.trace2skill import SkillConsolidator
-from .evolution.self_distill import SelfDistill
 from .agents import (
     create_explorer, create_deep_reader, create_synthesizer, create_critic,
 )
@@ -77,7 +76,6 @@ class ResearchOrchestrator:
         # Evolution components
         self.lse = LSEOptimizer(quality_fn=_default_quality_fn)
         self.skill_consolidator = SkillConsolidator(memory.base / "consolidated_skills")
-        self.self_distill = SelfDistill(None)  # attached per-agent at runtime
 
         # State
         self.iteration = 0
@@ -176,11 +174,11 @@ class ResearchOrchestrator:
             if hasattr(result, "result") and result.result:
                 r = result.result
                 if hasattr(r, "findings"):
-                    for f in r.findings:
+                    for idx, f in enumerate(r.findings):
                         self.memory.graph.add_finding(
-                            f"deepread_{self.iteration}_{r.findings.index(f)}",
-                            f.get("claim", "")[:500],
-                            source=f.get("source", "deep_reader"),
+                            f"deepread_{self.iteration}_{idx}",
+                            f.claim[:500],
+                            source=f.source,
                             category="finding",
                         )
                 self.frontier.absorb_findings(topic, 0.2, len(getattr(r, "findings", [])), [])
