@@ -31,6 +31,12 @@ Each agent is a `DurableAgent` subclass with a full DSPy pipeline inside:
 All agents wrapped in `@workflow_entry` for durable execution with `DaprChatClient`,
 `StateStoreService`, and automatic retry.
 
+**Shared primitives** in `lab/shared/research.py`:
+- `ResearchDirection` — single dataclass used by both `InMemoryFrontier` and `DaprFrontier`
+- `ResearchFrontier` ABC — defines the interface (seed, absorb, next_action, saturated)
+- `SATURATION_THRESHOLD`, `MAX_BOOTSTRAPPED_DEMOS`, `MAX_LABELED_DEMOS` — shared constants
+- `get_dapr_state_store()`, `get_lm_temperature()` in `lab/shared/config.py`
+
 ## DSPy + Dapr Integration
 
 | Component | DSPy Implementation | Dapr Role |
@@ -178,16 +184,22 @@ dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
 - **Durable workflows**: Research survives process crashes — Dapr Workflows checkpoint after each iteration
 - **Stateful frontier**: `DaprFrontier` uses Redis-backed state store, not JSON files
 - **No-infrastructure mode**: `InMemoryFrontier` + `NoopStore` let all agents run without Dapr for development
+- **Shared primitives**: `ResearchDirection`, `ResearchFrontier` ABC, and compile constants in `lab/shared/research.py` — no more duplicate dataclasses
+- **Dict-based frontier**: Both frontiers use `dict[str, ResearchDirection]` for O(1) lookups instead of O(n) list scans
+- **Correct active counts**: `_active_count()` computed from actual data instead of a broken increment-only cache
+- **Saturation cache**: `DaprFrontier` caches `_saturated_indices` and invalidates only on mutations — avoids an LLM call per `next_action()`
 - **Batch saturation**: `AssessBatchSaturation` replaces N+1 per-direction LLM calls with a single batch call
 - **Factory pattern**: `_create_agents()` eliminates repeated agent construction across all commands
+- **Dynamic agent commands**: `_make_dapr_cmd()` generates explorer/deepreader/synthesizer/critic from a single pattern
 - **Cached frontier counts**: `_active_count` tracks active/explored in O(1) instead of O(n) per summary
 - **Click CLI**: Command-based interface with `--query` and `--iterations` global options
 - **Rich output**: Tables and panels for research loop results and mission summaries
 - **Multi-agent dispatch**: `call_agent()` for cross-agent workflow orchestration
-- **DSPy-driven confidence**: Hardcoded confidence deltas (0.3, 0.2, 0.15) replaced with `ComputeConfidenceDelta` signature — delta adapts to finding quality
-- **DSPy-driven saturation**: Static 0.95 threshold replaced with `AssessDirectionSaturation` — per-direction assessment
+- **DSPy-driven confidence**: Hardcoded confidence deltas replaced with `ComputeConfidenceDelta` signature — delta adapts to finding quality
 - **MultiChainComparison**: CriticAgent compares 3 critique chains via `dspy.MultiChainComparison` before refinement
-- **Universal compilation**: Every DSPy program (`DeepReader`, `Synthesizer`, `Critic`, `LSE`, `Trace2Skill`, `Orchestrator`) has a `compile()` method ready for `BootstrapFewShot`
-- **LSE meta-optimization**: Improvement-based reward trains the orchestrator across runs
+- **Universal compilation**: Every DSPy program has a `compile()` method with shared constants
+- **LSE meta-optimization**: Improvement-based reward (`QualityEvaluation` via `dspy.ChainOfThought`) trains the orchestrator across runs
+- **Trace2Skill integration**: SkillConsolidator receives real trajectory data from LSE runs in `mission` command
+- **Wired config**: `get_lm_temperature()` used in all LM creation; `get_dapr_state_store()` replaces hardcoded `"research-state"` across 4 modules
 - **Pub/sub coordination**: `research-pubsub` topic for agent broadcasts
 - **Parallel tool execution**: `ToolExecutionMode.PARALLEL` for MCP tool calls

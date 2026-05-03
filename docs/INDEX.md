@@ -17,7 +17,7 @@ lab/
 ├── 09_super_deep_research/  Multi-agent research: UCB frontier + LSE evolution + KG memory
 ├── 10_dapr_deep_research/   Durable multi-agent: Dapr workflows + DSPy deltas + distillation
 ├── 99-sandbox/         Scratch space
-└── shared/             Env config, LM helpers shared across labs
+└── shared/             Env config, LM helpers, research primitives (ResearchDirection, ResearchFrontier ABC)
 ```
 
 ## API Reference by Module
@@ -33,8 +33,8 @@ lab/
 | [07-gfl](./07-generative-feedback-loops.md) | `main.py` | `ClassifyIntent`, `intent_metric()`, `gepa_metric()`, `eval_score()` | `ChainOfThought`, `BootstrapFewShot`, `MIPROv2`, `GEPA`, `Evaluate` |
 | [08-rlm-mcp](./08-rlm-mcp.md) | `main.py`, `mcp_server.json` | `MCPClient`, `MemoryManager`, `ClassifyContent`, `ResearchReport`, `content_metric()` | `ChainOfThought`, `RLM`, `BootstrapFewShot`, `MIPROv2`, `GEPA`, `BetterTogether`, `BAMLAdapter` |
 | [09-super-deep-research](./09-super-deep-research.md) | 16 files in 5 packages | `ResearchOrchestrator`, `ResearchFrontier`, `ResearchDirection`, `KnowledgeGraph`, `MemoryStore`, `MCPClient`, `LSEOptimizer`, `SkillConsolidator`, `SelfDistill`, 5 agent factories | `RLM`, `ChainOfThought` |
-| [10-dapr-deep-research](./10-dapr-deep-research.md) | 15 files in 6 packages | `ExplorerAgent`, `DeepReaderAgent`, `SynthesizerAgent`, `CriticAgent`, `ResearchWorkflow`, `DaprFrontier`, `LSEOptimizer`, `SkillConsolidator`, `MCPBridge`, 10 DSPy signatures | `RLM`, `ChainOfThought`, `BestOfN`, `Refine`, `MultiChainComparison`, `BootstrapFewShot`, `Evaluate`, `BAMLAdapter` |
-| [shared](./shared.md) | `config.py` | `get_env_or_raise()`, `get_env()`, `get_lm_model()`, `get_student_lm_model()`, `project_root()` | — |
+| [10-dapr-deep-research](./10-dapr-deep-research.md) | 15 files in 6 packages + shared | `ExplorerAgent`, `DeepReaderAgent`, `SynthesizerAgent`, `CriticAgent`, `ResearchWorkflow`, `InMemoryFrontier`, `DaprFrontier`, `ResearchFrontier` ABC, `ResearchDirection`, `NoopStore`, `LSEOptimizer`, `SkillConsolidator`, `MCPBridge`, `AssessBatchSaturation`, 10 DSPy signatures, shared compile constants | `RLM`, `ChainOfThought`, `BestOfN`, `Refine`, `MultiChainComparison`, `BootstrapFewShot`, `Evaluate`, `BAMLAdapter` |
+| [shared](./shared.md) | `config.py`, `research.py` | `get_lm_model()`, `get_student_lm_model()`, `get_lm_temperature()`, `get_agent_port()`, `get_dapr_state_store()`, `get_dapr_pubsub()`, `project_root()`, `ResearchDirection` dataclass, `ResearchFrontier` ABC, `SATURATION_THRESHOLD`, `MAX_BOOTSTRAPPED_DEMOS`, `MAX_LABELED_DEMOS` | — |
 
 ## Setup
 

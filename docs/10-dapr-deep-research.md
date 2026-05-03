@@ -2,7 +2,7 @@
 
 > Multi-agent research platform combining **dapr-agents** (DurableAgent, workflows, StateStoreService) with **DSPy 3.2** (RLM, ChainOfThought, BestOfN, Refine, MultiChainComparison, BootstrapFewShot, BAMLAdapter).
 >
-> Source: `lab/10_dapr_deep_research/` (15 files across 6 packages)
+> Source: `lab/10_dapr_deep_research/` (16 files across 6 packages + `lab/shared/research.py`)
 
 ## Package Structure
 
@@ -10,7 +10,7 @@
 lab/10_dapr_deep_research/
 ├── __init__.py
 ├── __main__.py                          # Entry: delegates to cli.main()
-├── cli.py                              # CLI modes: orchestrator, explorer, deepreader, synthesizer, critic, run, distill
+├── cli.py                              # CLI with dynamic commands, _create_agents factory
 ├── config/
 │   └── mcp_servers.json                # MCP server definitions (crawl4ai, fetch, openrouter)
 ├── agents/
@@ -22,7 +22,10 @@ lab/10_dapr_deep_research/
 │   └── trace2skill.py                  # SkillConsolidator — trajectory pattern extraction
 ├── memory/
 │   ├── __init__.py
-│   └── dapr_frontier.py                # DaprFrontier — Redis-backed UCB research frontier
+│   ├── frontier.py                     # InMemoryFrontier — dict-backed UCB frontier (no Dapr)
+│   ├── dapr_frontier.py                # DaprFrontier — Redis-backed, batch saturation + cache
+│   ├── noop_store.py                   # NoopStore — in-memory StateStoreService subclass
+│   └── skills/                         # Saved skill files (from SkillConsolidator)
 ├── orchestrator/
 │   ├── __init__.py
 │   └── workflow.py                     # ResearchWorkflow — LSE-driven orchestration loop
@@ -37,7 +40,8 @@ lab/10_dapr_deep_research/
 │   └── agent-registry.yaml             # Dapr state.redis for agent registry
 ├── dapr-multi-app-run.yaml             # 5-agent Dapr multi-app run config
 ├── docker-compose.yml                  # Crawl4AI container
-└── README.md
+├── README.md
+└── [shared] lab/shared/research.py      # ResearchDirection, ResearchFrontier ABC, constants
 ```
 
 ---
@@ -769,81 +773,33 @@ Load all saved skills from the persist directory.
 
 ---
 
+## memory/frontier.py
+
+### `InMemoryFrontier`
+
+An in-memory `ResearchFrontier` implementation. No Dapr sidecar or Redis needed.
+
+**Constructor:**
+```python
+frontier = InMemoryFrontier()
+# self.directions: dict[str, ResearchDirection] = {}
+# self.total_explorations: int = 0
+```
+
+All methods follow the `ResearchFrontier` ABC interface. Uses `dict` for O(1) lookups and `_active_count()` computed from actual data (no bug-prone increment-only cache).
+
+---
+
 ## memory/dapr_frontier.py
 
-### `AssessDirectionSaturation` (DSPy Signature)
+### `AssessBatchSaturation` (DSPy Signature)
 
-Determine if a research direction is saturated.
+Assess saturation for multiple research directions in a single call (batch replaces N+1 per-direction calls).
 
 - **Input**:
-  - `topic: str`
-  - `confidence: float`
-  - `exploration_depth: int`
-  - `source_count: int`
+  - `directions_json: str` — JSON array of `{topic, confidence, exploration_depth, source_count}`
 - **Output**:
-  - `is_saturated: bool` — whether saturated
-  - `reasoning: str` — why
-
----
-
-### `ResearchDirection` (dataclass)
-
-A single research direction tracked in the frontier.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `topic` | `str` | — | Research topic |
-| `confidence` | `float` | `0.0` | Confidence score (0.0–1.0) |
-| `exploration_depth` | `int` | `0` | Number of times explored |
-| `source_count` | `int` | `0` | Number of sources consulted |
-| `last_updated` | `str` | `""` | ISO 8601 timestamp of last update |
-| `parent_topic` | `str` or `None` | `None` | Parent topic that spawned this direction |
-| `seed_query` | `str` | `""` | Initial search query |
-
----
-
-#### `ucb_score(self, total_explorations: int, exploration_constant: float = 1.4) -> float`
-
-Compute the Upper Confidence Bound score for this direction.
-
-**Parameters**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `total_explorations` | `int` | — | Total explorations across all directions |
-| `exploration_constant` | `float` | `1.4` | Exploration-exploitation trade-off parameter |
-
-**Formula**:
-```
-if exploration_depth == 0: return inf
-exploitation = confidence
-exploration = exploration_constant * sqrt(log(total_explorations + 1) / (exploration_depth + 1))
-return exploitation + exploration
-```
-
-**Returns**: `float` — UCB score. Returns `float("inf")` for unexplored directions.
-
----
-
-#### `to_dict(self) -> dict`
-
-Serialize to dictionary for Redis persistence.
-
-**Returns**: `dict` with fields: `topic`, `confidence`, `exploration_depth`, `source_count`, `last_updated`, `parent_topic`, `seed_query`.
-
----
-
-#### `from_dict(d: dict) -> ResearchDirection` (classmethod)
-
-Deserialize from dictionary.
-
-**Parameters**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `d` | `dict` | Dictionary with matching field names |
-
-**Returns**: `ResearchDirection` instance.
+  - `saturated_indices: list[int]` — indices of saturated directions
 
 ---
 
@@ -867,9 +823,11 @@ ResearchFrontier persisted via Dapr `StateStoreService`. Survives process restar
 - `self._key: str` — persistence key
 - `self.directions: list[ResearchDirection]` — all tracked directions
 - `self._total_explorations: int` — accumulated exploration count
-- `self._saturation: dspy.ChainOfThought[AssessDirectionSaturation]` — saturation evaluator
+- `self.directions: dict[str, ResearchDirection]` — O(1) dict lookup, not O(n) list scan
+- `self._saturation_batch: dspy.ChainOfThought[AssessBatchSaturation]` — batch saturation evaluator
+- `self._saturation_cache: set[int] | None` — cached saturation indices, invalidated on mutations
 
-**Init behavior**: Calls `self._load()` to restore state from Redis.
+**Init behavior**: Calls `self._load()` to restore state from Redis, sets up batch saturation with caching.
 
 ---
 
@@ -1092,6 +1050,22 @@ Execute the full LSE-driven research loop. This is a **generator coroutine** tha
 - `frontier` (str) — `frontier.summary()` text
 - `findings_count` (int) — total findings collected
 - `improvement_trend` (list[float]) — LSE improvement deltas
+
+---
+
+## memory/noop_store.py
+
+### `NoopStore`
+
+In-memory `StateStoreService` subclass. No Dapr sidecar needed — stores everything in a dict.
+
+```python
+store = NoopStore()
+store.save(key="my-key", value={"data": 42})
+result = store.load(key="my-key")  # {"data": 42}
+```
+
+Used in `_create_agents()` to let all 4 agent classes run without Dapr infrastructure.
 
 ---
 

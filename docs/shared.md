@@ -1,18 +1,26 @@
 # shared — Environment Config & LM Helpers
 
-> **File:** `lab/shared/config.py`
-> **Purpose:** Centralized environment variable loading and project path helpers shared across all labs.
+> **Files:** `lab/shared/config.py`, `lab/shared/research.py`
+> **Purpose:** Centralized environment variable loading, project path helpers, and research primitives shared across all labs.
 
 ## Setup
 
 ```python
 from shared.config import (
-    get_env_or_raise,
-    get_env,
     get_lm_model,
     get_student_lm_model,
     get_lm_temperature,
+    get_agent_port,
+    get_dapr_state_store,
+    get_dapr_pubsub,
     project_root,
+)
+from shared.research import (
+    ResearchDirection,
+    ResearchFrontier,
+    SATURATION_THRESHOLD,
+    MAX_BOOTSTRAPPED_DEMOS,
+    MAX_LABELED_DEMOS,
 )
 ```
 
@@ -24,7 +32,7 @@ Place a `.env` file in the project root (parent of `lab/`). The config module re
 
 | Key | Description |
 |-----|-------------|
-| `DEEPSEEK_API_KEY` | API key for Deepseek LLM access. Without it, `get_env_or_raise("DEEPSEEK_API_KEY")` raises. |
+| `DEEPSEEK_API_KEY` | API key for Deepseek LLM access. Required for any LLM call. |
 
 ### Optional
 
@@ -57,28 +65,6 @@ DAPR_PUBSUB=pubsub
 ```
 
 ## API Reference
-
-### get_env_or_raise(key: str) -> str
-
-Read a required environment variable. Raises `ValueError` with a clear message if the variable is missing or empty.
-
-```python
-api_key = get_env_or_raise("DEEPSEEK_API_KEY")
-# Raises ValueError("Missing DEEPSEEK_API_KEY. Set it in the project root .env file or export it in your shell.")
-```
-
-Use this for credentials and other values that must be present at runtime.
-
-### get_env(key: str, default: str = "") -> str
-
-Read an optional environment variable with a fallback default.
-
-```python
-url = get_env("CRAWL4AI_URL", "http://localhost:11235")
-# Returns the env value, or "http://localhost:11235" if not set.
-```
-
-Returns `str` regardless of the default type. Use `get_lm_temperature()` for numeric defaults.
 
 ### get_lm_model(default: str = "deepseek/deepseek-v4-flash") -> str
 
@@ -133,13 +119,114 @@ env_path = project_root() / ".env"
 
 Resolution is based on the file location of `shared/config.py`, so it works regardless of the current working directory.
 
+### get_agent_port(agent_name: str = "orchestrator") -> int
+
+Returns the default gRPC port for a Dapr agent.
+
+```python
+port = get_agent_port("explorer")         # 8001
+port = get_agent_port("orchestrator")     # 8000
+port = get_agent_port("unknown")          # 8000 (fallback)
+```
+
+Used by `_make_dapr_cmd()` in the CLI to start each agent server on its assigned port.
+
+### get_dapr_state_store() -> str
+
+Returns the Dapr state store component name from `DAPR_STATE_STORE` env var, defaulting to `"research-state"`.
+
+```python
+store_name = get_dapr_state_store()
+# os.getenv("DAPR_STATE_STORE", "research-state")
+```
+
+Used in `dapr_frontier.py`, `workflow.py`, and all 4 agent classes to avoid hardcoding.
+
+### get_dapr_pubsub() -> str
+
+Returns the Dapr pubsub component name from `DAPR_PUBSUB` env var, defaulting to `"research-pubsub"`.
+
+### project_root() -> Path
+
+Return the absolute path to the project root directory (the parent of `lab/`).
+
+```python
+root = project_root()
+# Path("/home/user/projects/experiments")
+
+env_path = project_root() / ".env"
+```
+
+Resolution is based on the file location of `shared/config.py`, so it works regardless of the current working directory.
+
+---
+
+## `research.py` — Shared Research Primitives
+
+Module defining the core dataclass, ABC, and constants used by both `InMemoryFrontier` and `DaprFrontier`.
+
+### ResearchDirection
+
+A `@dataclass` representing a single research direction in the frontier.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `topic` | `str` | required | Research topic/subtopic |
+| `confidence` | `float` | `0.0` | Current confidence score 0–1 |
+| `exploration_depth` | `int` | `0` | Number of times explored |
+| `source_count` | `int` | `0` | Sources discovered |
+| `last_updated` | `str` | `""` | ISO 8601 timestamp |
+| `parent_topic` | `str\|None` | `None` | Parent direction (for hierarchical tracking) |
+| `seed_query` | `str` | `""` | Query used to discover this direction |
+
+**Methods:**
+
+```python
+d = ResearchDirection(topic="Transformers")
+d.ucb_score(total_explorations=10)       # UCB1 score for exploration/exploitation
+d.is_saturated(threshold=0.95)           # True if confidence >= threshold
+d.to_dict()                              # Serialize to dict
+ResearchDirection.from_dict(data)        # Deserialize from dict
+```
+
+### ResearchFrontier (ABC)
+
+Abstract base class defining the frontier interface. All implementations must provide:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `seed_from_query(query)` | `None` | Add initial research query as a direction |
+| `seed_from_directions(topics, parent)` | `None` | Add new directions from discovered subtopics |
+| `next_action()` | `ResearchDirection\|None` | Pick the best direction to explore next |
+| `absorb_findings(topic, delta, sources, follow_ups)` | `None` | Update a direction with new findings |
+| `saturated()` | `bool` | True if all directions are saturated |
+| `summary()` | `str` | Human-readable frontier status |
+| `directions` | `dict` (property) | All directions dict[str, ResearchDirection] |
+| `total_explorations` | `int` | Running count of explorations |
+
+**Concrete helpers:**
+
+```python
+frontier._active_count()                # Count of non-saturated directions
+frontier._next_action_from_directins(candidates)  # UCB-based selection
+```
+
+### Constants
+
+| Constant | Value | Used In |
+|----------|-------|---------|
+| `SATURATION_THRESHOLD` | `0.95` | Frontier saturation checks, workflow.py |
+| `MAX_BOOTSTRAPPED_DEMOS` | `4` | All `BootstrapFewShot.compile()` calls |
+| `MAX_LABELED_DEMOS` | `2` | All `BootstrapFewShot.compile()` calls |
+
 ## Summary
 
 | Function | Reads Env Var | Default | Type | Raises |
 |----------|---------------|---------|------|--------|
-| `get_env_or_raise(key)` | any | none | `str` | `ValueError` if missing |
-| `get_env(key, default)` | any | `""` | `str` | never |
 | `get_lm_model(default)` | `LLM_MODEL` | `deepseek/deepseek-v4-flash` | `str` | never |
 | `get_student_lm_model(default)` | `STUDENT_LLM_MODEL` | `ollama_chat/gemma4` | `str` | never |
 | `get_lm_temperature(default)` | `LLM_TEMPERATURE` | `0.3` | `float` | never (falls back to default) |
+| `get_agent_port(name)` | none | `8000` | `int` | never |
+| `get_dapr_state_store()` | `DAPR_STATE_STORE` | `research-state` | `str` | never |
+| `get_dapr_pubsub()` | `DAPR_PUBSUB` | `research-pubsub` | `str` | never |
 | `project_root()` | none | n/a | `Path` | never |
