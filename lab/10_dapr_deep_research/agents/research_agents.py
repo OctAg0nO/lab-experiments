@@ -133,9 +133,16 @@ class ExplorerAgent(DurableAgent):
             **kwargs,
         )
 
-    def compile(self, trainset: list[dspy.Example]):
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        teacher = self._hypothesis_gen
+        student = dspy.ChainOfThought(GenerateHypotheses) if student_lm else teacher
+        if student_lm:
+            student.set_lm(student_lm)
         bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: len(pred.hypotheses) > 0, max_bootstrapped_demos=4, max_labeled_demos=2)
-        self._hypothesis_gen = bs.compile(self._hypothesis_gen, trainset=trainset)
+        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+        if student_lm:
+            compiled.set_lm(student_lm)
+        self._hypothesis_gen = compiled
 
     @workflow_entry
     def explore(self, ctx, input: dict) -> dict:
@@ -173,9 +180,16 @@ class DeepReaderAgent(DurableAgent):
             **kwargs,
         )
 
-    def compile(self, trainset: list[dspy.Example]):
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        teacher = self._cross_validator
+        student = dspy.ChainOfThought(CrossValidateFindings) if student_lm else teacher
+        if student_lm:
+            student.set_lm(student_lm)
         bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "validated_claims") and len(pred.validated_claims) > 0, max_bootstrapped_demos=4, max_labeled_demos=2)
-        self._cross_validator = bs.compile(self._cross_validator, trainset=trainset)
+        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+        if student_lm:
+            compiled.set_lm(student_lm)
+        self._cross_validator = compiled
 
     @workflow_entry
     def deep_read(self, ctx, input: dict) -> dict:
@@ -214,9 +228,16 @@ class SynthesizerAgent(DurableAgent):
             **kwargs,
         )
 
-    def compile(self, trainset: list[dspy.Example]):
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        teacher = self._synthesizer
+        student = dspy.ChainOfThought(SynthesizeAcrossSources) if student_lm else teacher
+        if student_lm:
+            student.set_lm(student_lm)
         bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "synthesis") and len(pred.synthesis) > 50, max_bootstrapped_demos=4, max_labeled_demos=2)
-        self._synthesizer = bs.compile(self._synthesizer, trainset=trainset)
+        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+        if student_lm:
+            compiled.set_lm(student_lm)
+        self._synthesizer = compiled
 
     @workflow_entry
     def synthesize(self, ctx, input: dict) -> dict:
@@ -253,9 +274,19 @@ class CriticAgent(DurableAgent):
             **kwargs,
         )
 
-    def compile(self, trainset: list[dspy.Example]):
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        teacher = self._refine
+        if student_lm:
+            inner = dspy.ChainOfThought("research_summary: str, critique: str -> improved_critique: str")
+            inner.set_lm(student_lm)
+            student = dspy.Refine(inner, N=3, reward_fn=lambda _, pred: 1.0 if len(pred.improved_critique) > 50 else 0.0, threshold=0.5)
+        else:
+            student = teacher
         bs = dspy.BootstrapFewShot(metric=lambda _ex, pred, _trace: hasattr(pred, "improved_critique") and len(pred.improved_critique) > 100, max_bootstrapped_demos=4, max_labeled_demos=2)
-        self._refine = bs.compile(self._refine, trainset=trainset)
+        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+        if student_lm:
+            compiled.set_lm(student_lm)
+        self._refine = compiled
 
     @workflow_entry
     def critique(self, ctx, input: dict) -> dict:

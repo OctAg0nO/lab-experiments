@@ -27,7 +27,7 @@ lab/
 
 ```bash
 uv sync
-cp .env.example .env   # fill in DEEPSEEK_API_KEY
+cp .env.example .env   # fill in DEEPSEEK_API_KEY and configure models
 ```
 
 ## Running

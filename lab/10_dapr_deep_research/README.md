@@ -51,6 +51,28 @@ All agents wrapped in `@workflow_entry` for durable execution with `DaprChatClie
 - **LSE** (Chen et al., 2026): [Learning to Self-Evolve](https://arxiv.org/abs/2603.18620) — improvement-based reward `r = R̄(c₁) − R̄(c₀)` evaluated via `dspy.ChainOfThought`
 - **Trace2Skill** (Ni et al., 2026): [Distill Trajectory-Local Lessons into Transferable Agent Skills](https://arxiv.org/abs/2603.25158) — parallel multi-agent patch proposal via `dspy.ChainOfThought`
 
+## Configuration
+
+All configuration is in the project root `.env` file:
+
+```bash
+# Required
+DEEPSEEK_API_KEY="sk-..."
+
+# LLM model selection
+LLM_MODEL="deepseek/deepseek-v4-flash"        # Teacher / default LM
+STUDENT_LLM_MODEL="ollama_chat/gemma4"        # Student LM for distillation
+LLM_TEMPERATURE=0.3
+
+# Infrastructure
+CRAWL4AI_URL="http://localhost:11235/mcp/sse"
+DAPR_REDIS_HOST="localhost:6379"
+DAPR_STATE_STORE="research-state"
+DAPR_PUBSUB="research-pubsub"
+```
+
+Copy `.env.example` from the project root to get started.
+
 ## Prerequisites
 
 ```bash
@@ -62,6 +84,9 @@ docker compose -f lab/10_dapr_deep_research/docker-compose.yml up -d
 
 # Install deps
 uv sync
+
+# Optional — student model for distillation
+ollama pull gemma4
 ```
 
 ## Running
@@ -91,6 +116,17 @@ dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 \
 ```bash
 python -m lab.10_dapr_deep_research --mode run
 ```
+
+### Teacher/Student distillation:
+
+```bash
+python -m lab.10_dapr_deep_research --mode distill
+```
+
+Compiles every DSPy program (`ChainOfThought`, `Refine`, etc.) using
+`BootstrapFewShot` — teacher (DeepSeek) generates demonstrations, student
+(Gemma 4 via Ollama) learns from them. After compilation, all internal
+modules use the student LM at inference time.
 
 ## Key Features
 

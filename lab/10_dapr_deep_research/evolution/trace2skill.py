@@ -32,12 +32,19 @@ class SkillConsolidator:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._extractor = dspy.ChainOfThought(ExtractPatterns)
 
-    def compile(self, trainset: list[dspy.Example]):
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        teacher = self._extractor
+        student = dspy.ChainOfThought(ExtractPatterns) if student_lm else teacher
+        if student_lm:
+            student.set_lm(student_lm)
         bs = dspy.BootstrapFewShot(
             metric=lambda _ex, pred, _trace: hasattr(pred, "error_patterns") and len(pred.error_patterns) > 10,
             max_bootstrapped_demos=4, max_labeled_demos=2,
         )
-        self._extractor = bs.compile(self._extractor, trainset=trainset)
+        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+        if student_lm:
+            compiled.set_lm(student_lm)
+        self._extractor = compiled
 
     def _build_trajectory_text(self, traj: dict) -> str:
         steps = traj if isinstance(traj, list) else traj.get("trajectory", [])

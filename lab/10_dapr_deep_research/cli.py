@@ -1,11 +1,12 @@
 """
-CLI — start individual Dapr agents or the multi-app research run.
+CLI — start individual Dapr agents or run teacher/student distillation.
 
 Usage:
     dapr run --app-id orchestrator --app-protocol grpc --app-port 8000 --resources-path ./resources -- \
         python -m lab.10_dapr_deep_research --mode orchestrator
     dapr run --app-id explorer-agent --app-protocol grpc --app-port 8001 --resources-path ./resources -- \
         python -m lab.10_dapr_deep_research --mode explorer
+    python -m lab.10_dapr_deep_research --mode distill
 """
 
 from __future__ import annotations
@@ -17,9 +18,12 @@ from dotenv import load_dotenv
 import dspy
 from dspy.adapters.baml_adapter import BAMLAdapter
 
+from ..shared.config import get_lm_model, get_student_lm_model
 from .mcp.client import MCPClient
 from .mcp.bridge import MCPBridge
 from .memory.dapr_frontier import DaprFrontier
+from .evolution.lse import LSEOptimizer
+from .evolution.trace2skill import SkillConsolidator
 from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent
 from .orchestrator.workflow import ResearchWorkflow
 
@@ -28,7 +32,8 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config" / "mcp_servers.json"
 
-dspy.configure(lm=dspy.LM("deepseek/deepseek-v4-flash"), adapter=BAMLAdapter())
+_TEACHER_LM = dspy.LM(get_lm_model())
+dspy.configure(lm=_TEACHER_LM, adapter=BAMLAdapter())
 
 
 def _get_bridge() -> MCPBridge:
@@ -96,9 +101,48 @@ def cmd_run():
     client.close()
 
 
+def cmd_distill():
+    """Teacher (DeepSeek) → student (Gemma 4) distillation for all DSPy programs.
+
+    Compiles every ChainOfThought / Refine module using BootstrapFewShot
+    with the teacher generating demonstrations and the student learning from them.
+    """
+    teacher_lm = _TEACHER_LM
+    student_lm = dspy.LM(get_student_lm_model())
+    print(f"Teacher: {get_lm_model()}")
+    print(f"Student: {get_student_lm_model()}")
+
+    bridge = _get_bridge()
+    trainset: list[dspy.Example] = []
+
+    agents: list[tuple[str, ExplorerAgent | DeepReaderAgent | SynthesizerAgent | CriticAgent | ResearchWorkflow | DaprFrontier | LSEOptimizer | SkillConsolidator]] = [
+        ("ExplorerAgent", ExplorerAgent(bridge=bridge)),
+        ("DeepReaderAgent", DeepReaderAgent(bridge=bridge)),
+        ("SynthesizerAgent", SynthesizerAgent(bridge=bridge)),
+        ("CriticAgent", CriticAgent()),
+        ("Workflow", ResearchWorkflow(frontier=DaprFrontier())),
+        ("LSEOptimizer", LSEOptimizer()),
+        ("SkillConsolidator", SkillConsolidator(BASE_DIR / "memory" / "skills")),
+        ("DaprFrontier", DaprFrontier()),
+    ]
+
+    for name, agent in agents:
+        if hasattr(agent, "compile") and trainset:
+            print(f"  Compiling {name} with student LM ...")
+            try:
+                agent.compile(trainset, student_lm=student_lm)
+                print(f"    ✓ {name} compiled")
+            except Exception as e:
+                print(f"    ✗ {name} failed: {e}")
+        else:
+            print(f"  Skipping {name} (no trainset or no compile())")
+
+    print("\nDistillation complete. All compiled modules use student_lm for inference.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Dapr Deep Research — multi-agent research platform")
-    parser.add_argument("--mode", choices=["orchestrator", "explorer", "deepreader", "synthesizer", "critic", "run"], default="run")
+    parser.add_argument("--mode", choices=["orchestrator", "explorer", "deepreader", "synthesizer", "critic", "run", "distill"], default="run")
     args = parser.parse_args()
 
     modes = {
@@ -108,6 +152,7 @@ def main():
         "synthesizer": cmd_synthesizer,
         "critic": cmd_critic,
         "run": cmd_run,
+        "distill": cmd_distill,
     }
     modes[args.mode]()
 

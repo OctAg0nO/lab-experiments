@@ -60,12 +60,25 @@ class ResearchWorkflow(DurableAgent):
             **kwargs,
         )
 
-    def compile(self, trainset: list[dspy.Example]):
-        bs = dspy.BootstrapFewShot(
-            metric=lambda _ex, pred, _trace: hasattr(pred, "selected_agent") and pred.selected_agent in ("explorer", "deepreader", "synthesizer"),
-            max_bootstrapped_demos=4, max_labeled_demos=2,
-        )
-        self._agent_selector = bs.compile(self._agent_selector, trainset=trainset)
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        for name in ("_agent_selector", "_conf_delta"):
+            teacher = getattr(self, name)
+            if student_lm:
+                sig_cls = SelectAgent if name == "_agent_selector" else ComputeConfidenceDelta
+                student = dspy.ChainOfThought(sig_cls)
+                student.set_lm(student_lm)
+            else:
+                student = teacher
+            metric_fn = (
+                (lambda _ex, pred, _trace: hasattr(pred, "selected_agent") and pred.selected_agent in ("explorer", "deepreader", "synthesizer"))
+                if name == "_agent_selector" else
+                (lambda _ex, pred, _trace: hasattr(pred, "confidence_delta") and 0.0 <= pred.confidence_delta <= 0.5)
+            )
+            bs = dspy.BootstrapFewShot(metric=metric_fn, max_bootstrapped_demos=4, max_labeled_demos=2)
+            compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+            if student_lm:
+                compiled.set_lm(student_lm)
+            setattr(self, name, compiled)
 
     @workflow_entry
     def run_research(self, ctx, input: dict):

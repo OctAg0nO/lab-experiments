@@ -70,6 +70,20 @@ class DaprFrontier:
         self._saturation = dspy.ChainOfThought(AssessDirectionSaturation)
         self._load()
 
+    def compile(self, trainset: list[dspy.Example], student_lm: dspy.LM | None = None):
+        teacher = self._saturation
+        student = dspy.ChainOfThought(AssessDirectionSaturation) if student_lm else teacher
+        if student_lm:
+            student.set_lm(student_lm)
+        bs = dspy.BootstrapFewShot(
+            metric=lambda _ex, pred, _trace: hasattr(pred, "is_saturated"),
+            max_bootstrapped_demos=4, max_labeled_demos=2,
+        )
+        compiled = bs.compile(student, teacher=teacher, trainset=trainset)
+        if student_lm:
+            compiled.set_lm(student_lm)
+        self._saturation = compiled
+
     def _load(self):
         raw = self._store.load(key=self._key)
         if raw:
