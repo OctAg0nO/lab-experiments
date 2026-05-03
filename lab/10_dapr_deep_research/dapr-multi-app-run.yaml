@@ -3,30 +3,30 @@ apps:
   - appID: orchestrator
     appDirPath: ../../
     appPort: 8000
-    command: ["python", "-m", "lab.10_dapr_deep_research", "--mode", "orchestrator"]
+    command: ["uv", "run", "python", "-m", "lab.10_dapr_deep_research", "--mode", "orchestrator"]
     appProtocol: grpc
     resourcesPath: lab/10_dapr_deep_research/resources
   - appID: explorer-agent
     appDirPath: ../../
     appPort: 8001
-    command: ["python", "-m", "lab.10_dapr_deep_research", "--mode", "explorer"]
+    command: ["uv", "run", "python", "-m", "lab.10_dapr_deep_research", "--mode", "explorer"]
     appProtocol: grpc
     resourcesPath: lab/10_dapr_deep_research/resources
   - appID: deepreader-agent
     appDirPath: ../../
     appPort: 8002
-    command: ["python", "-m", "lab.10_dapr_deep_research", "--mode", "deepreader"]
+    command: ["uv", "run", "python", "-m", "lab.10_dapr_deep_research", "--mode", "deepreader"]
     appProtocol: grpc
     resourcesPath: lab/10_dapr_deep_research/resources
   - appID: synthesizer-agent
     appDirPath: ../../
     appPort: 8003
-    command: ["python", "-m", "lab.10_dapr_deep_research", "--mode", "synthesizer"]
+    command: ["uv", "run", "python", "-m", "lab.10_dapr_deep_research", "--mode", "synthesizer"]
     appProtocol: grpc
     resourcesPath: lab/10_dapr_deep_research/resources
   - appID: critic-agent
     appDirPath: ../../
     appPort: 8004
-    command: ["python", "-m", "lab.10_dapr_deep_research", "--mode", "critic"]
+    command: ["uv", "run", "python", "-m", "lab.10_dapr_deep_research", "--mode", "critic"]
     appProtocol: grpc
     resourcesPath: lab/10_dapr_deep_research/resources
