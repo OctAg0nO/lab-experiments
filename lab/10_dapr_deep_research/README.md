@@ -18,22 +18,32 @@ flowchart TB
     C --> R
 ```
 
-Each agent is a `DurableAgent` subclass with:
-- `@workflow_entry` — workflow-backed execution with automatic retry
-- `DaprChatClient` — LLM access via Dapr Conversation API
-- `StateStoreService` — persistent state across crashes
-- Internal `dspy.RLM` — DSPy's recursive LM for the actual AI work
+Each agent is a `DurableAgent` subclass with a full DSPy pipeline inside:
 
-## DSPy Integration
+| Agent | DSPy Modules |
+|---|---|
+| Explorer | `dspy.RLM` (discovery) + `dspy.ChainOfThought` (hypothesis gen) + `dspy.BestOfN` (diverse sampling) |
+| DeepReader | `dspy.RLM` (content extraction) + `dspy.ChainOfThought` (cross-validation) |
+| Synthesizer | `dspy.RLM` (synthesis) + `dspy.Ensemble` (multi-perspective) |
+| Critic | `dspy.RLM` (critique) + `dspy.Refine` (iterative improvement) |
 
-| Component | DSPy Code | Dapr Role |
-|-----------|-----------|-----------|
-| Research RLMs | `dspy.RLM(signature, tools=tools)` | `DurableAgent` shell with workflow durability |
-| Optimization | `BootstrapFewShot`, `MIPROv2`, `GEPA`, `BetterTogether` | Workflow steps with checkpoint/restart |
-| Frontier | `ResearchFrontier` (UCB priority) | `DaprFrontier` backed by `StateStoreService` |
-| LSE | `LSEOptimizer` (improvement-based reward) | State persisted in Dapr state store |
-| Trace2Skill | `SkillConsolidator` | State persisted in Dapr state store |
-| Metrics | `dspy.Evaluate`, custom metrics | Workflow step evaluation |
+All agents wrapped in `@workflow_entry` for durable execution with `DaprChatClient`,
+`StateStoreService`, and automatic retry.
+
+## DSPy + Dapr Integration
+
+| Component | DSPy Implementation | Dapr Role |
+|-----------|-------------------|-----------|
+| Quality eval | `dspy.ChainOfThought(QualityEvaluation)` | State persisted in Redis |
+| Pattern extraction | `dspy.ChainOfThought(ExtractPatterns)` | State persisted in Redis |
+| Agent reasoning | `dspy.RLM` + `dspy.CoT` + `dspy.BestOfN` + `dspy.Ensemble` + `dspy.Refine` | `DurableAgent` shell + `call_agent()` dispatch |
+| Frontier | `ResearchDirection.ucb_score` (pure math) | `DaprFrontier` via `StateStoreService` |
+| Metrics | `dspy.Evaluate` | Workflow step checkpointing |
+
+## References
+
+- **LSE** (Chen et al., 2026): [Learning to Self-Evolve](https://arxiv.org/abs/2603.18620) — improvement-based reward `r = R̄(c₁) − R̄(c₀)` evaluated via `dspy.ChainOfThought`
+- **Trace2Skill** (Ni et al., 2026): [Distill Trajectory-Local Lessons into Transferable Agent Skills](https://arxiv.org/abs/2603.25158) — parallel multi-agent patch proposal via `dspy.ChainOfThought`
 
 ## Prerequisites
 
