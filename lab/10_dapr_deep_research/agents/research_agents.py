@@ -97,7 +97,7 @@ class ExplorerAgent(DurableAgent):
         search_tools = [t for t in dspy_tools if t.__name__ in ("search", "chat", "model_list")] or dspy_tools
         self._rlm = _rlm_factory("task: str -> result: ExplorationResult", search_tools, 8, 12)
         self._hypothesis_gen = dspy.ChainOfThought(GenerateHypotheses)
-        self._hypothesis_best = dspy.BestOfN(dspy.ChainOfThought(GenerateHypotheses), n=3, metric=lambda ex, pred, trace=None: len(pred.hypotheses) if hasattr(pred, "hypotheses") else 0)
+        self._hypothesis_best = dspy.BestOfN(dspy.ChainOfThought(GenerateHypotheses), N=3, reward_fn=lambda args, pred: len(pred.hypotheses) if hasattr(pred, "hypotheses") else 0, threshold=0.5)
         self._compiled = False
         super().__init__(
             name="ExplorerAgent", role="Research Explorer",
