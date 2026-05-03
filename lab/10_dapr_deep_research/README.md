@@ -151,6 +151,7 @@ Commands:
   deepreader    Start DeepReaderAgent on port 8002 (Dapr + Crawl4AI)
   synthesizer   Start SynthesizerAgent on port 8003 (Dapr sidecar)
   critic        Start CriticAgent on port 8004 (Dapr sidecar)
+  chat          Interactive research REPL (no infrastructure)
   run           Agent selection demo (no infrastructure)
   mission       Full pipeline: MCP → GFL → LSE (no infrastructure)
   distill       Teacher→Student compilation for all DSPy programs
