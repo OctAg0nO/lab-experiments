@@ -32,7 +32,7 @@ from .mcp.bridge import MCPBridge
 from .memory.dapr_frontier import DaprFrontier, ResearchDirection
 from .evolution.lse import LSEOptimizer
 from .evolution.trace2skill import SkillConsolidator
-from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent
+from .agents.research_agents import ExplorerAgent, DeepReaderAgent, SynthesizerAgent, CriticAgent, SelectAgent
 from .orchestrator.workflow import ResearchWorkflow
 
 
@@ -89,13 +89,19 @@ def _get_bridge() -> MCPBridge:
     return MCPBridge(client, tool_defs)
 
 
-def cmd_orchestrator():
+def cmd_orchestrator(query: str = ""):
     frontier = DaprFrontier()
     print(f"Frontier: {frontier.summary()}")
     agent = ResearchWorkflow(frontier=frontier)
     from dapr_agents import AgentRunner
     runner = AgentRunner()
-    runner.serve(agent, port=8000)
+    if query:
+        print(f"Research query: {query}")
+        runner.serve(agent, port=8000, input={"query": query})
+    else:
+        print("No query provided. Use --query to set a research topic.")
+        print("The workflow will wait for an external trigger via Dapr API.")
+        runner.serve(agent, port=8000)
 
 
 def cmd_explorer():
@@ -129,20 +135,44 @@ def cmd_critic():
     runner.serve(agent, port=8004)
 
 
-def cmd_run():
-    """Single-process programmatic run (no Dapr sidecar needed)."""
+def cmd_run(query: str = ""):
+    """Single-process research demo using the agent pipeline (no Dapr sidecar needed).
+
+    Seeds the frontier with a query, then runs iterations that:
+    1. Select the next direction via UCB
+    2. Dispatches to the appropriate agent (explore/deep-read/synthesize)
+    3. Absorbs findings and tracks progress
+
+    Without Dapr, the agent dispatch uses DSPy ChainOfThought (SelectAgent)
+    to demonstrate the decision logic. Full agent execution requires Dapr sidecars.
+    """
+    if not query:
+        query = "Research DSPy optimization patterns for LLM pipelines"
+
+    llm = dspy.LM(get_lm_model())
+    agent_selector = dspy.ChainOfThought(SelectAgent)
+
     frontier = _InMemoryFrontier()
     print(f"Frontier: {frontier.summary()}")
-    print("Running research loop programmatically...")
-    query = "Research DSPy optimization patterns for LLM pipelines"
+    print(f"Query: {query}")
+    print("Running research loop...\n")
+
     frontier.seed_from_query(query)
+
     for i in range(3):
         direction = frontier.next_action()
         if not direction:
             break
-        print(f"  Iteration {i+1}: {direction.topic[:60]}")
+        selection = agent_selector(
+            exploration_depth=direction.exploration_depth,
+            confidence=direction.confidence,
+            topic=direction.topic,
+        )
+        selected = selection.selected_agent if hasattr(selection, "selected_agent") else "explorer"
+        print(f"  Iteration {i+1}: [{selected}] {direction.topic[:70]}")
         frontier.absorb_findings(direction.topic, 0.2, 1, [])
-    print(f"Done. {frontier.summary()}")
+
+    print(f"\nDone. {frontier.summary()}")
 
 
 def cmd_distill():
@@ -186,19 +216,28 @@ def cmd_distill():
 
 def main():
     parser = argparse.ArgumentParser(description="Dapr Deep Research — multi-agent research platform")
-    parser.add_argument("--mode", choices=["orchestrator", "explorer", "deepreader", "synthesizer", "critic", "run", "distill"], default="run")
+    parser.add_argument("--mode", choices=["orchestrator", "explorer", "deepreader", "synthesizer", "critic", "run", "distill"], default="run",
+                        help="orchestrator (Dapr) | explorer (Dapr) | deepreader (Dapr) | synthesizer (Dapr) | critic (Dapr) | run (no infra) | distill (no infra)")
+    parser.add_argument("--query", "-q", type=str, default="",
+                        help="Research topic or question (used by: orchestrator, run)")
+    parser.add_argument("--iterations", "-i", type=int, default=3,
+                        help="Max research iterations (used by: run)")
     args = parser.parse_args()
 
-    modes = {
-        "orchestrator": cmd_orchestrator,
-        "explorer": cmd_explorer,
-        "deepreader": cmd_deep_reader,
-        "synthesizer": cmd_synthesizer,
-        "critic": cmd_critic,
-        "run": cmd_run,
-        "distill": cmd_distill,
-    }
-    modes[args.mode]()
+    if args.mode == "orchestrator":
+        cmd_orchestrator(query=args.query)
+    elif args.mode == "explorer":
+        cmd_explorer()
+    elif args.mode == "deepreader":
+        cmd_deep_reader()
+    elif args.mode == "synthesizer":
+        cmd_synthesizer()
+    elif args.mode == "critic":
+        cmd_critic()
+    elif args.mode == "run":
+        cmd_run(query=args.query)
+    elif args.mode == "distill":
+        cmd_distill()
 
 
 if __name__ == "__main__":

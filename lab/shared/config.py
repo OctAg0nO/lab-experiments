@@ -3,6 +3,10 @@
 import os
 from pathlib import Path
 
+# LiteLLM fetches a remote model cost map during `import dspy`.  Force the
+# local fallback so the import doesn't hang on a flaky network request.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 
 def get_env_or_raise(key: str) -> str:
     """Get an env var or raise a clear error."""
