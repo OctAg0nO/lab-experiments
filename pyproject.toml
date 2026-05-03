@@ -1,0 +1,12 @@
+[project]
+name = "experiments"
+version = "0.1.0"
+description = "DSPy lab / showroom"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dspy-ai>=3.2.0",
+    "mcp>=1.27.0",
+    "python-dotenv>=1.0.0",
+    "ruff>=0.15.12",
+]

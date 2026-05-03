@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "description": "Fetch URLs and extract markdown content",
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "crawl4ai": {
+      "description": "Web crawling and content extraction (docker: unclecode/crawl4ai:latest)",
+      "type": "sse",
+      "url": "http://localhost:11235/mcp/sse"
+    }
+  }
+}
