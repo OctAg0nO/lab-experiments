@@ -1,12 +1,22 @@
 # 11 — Meta-Agent: Dynamic Agent Generation with DSPy 3.2
 
-Generates specialized DSPy agents **on the fly** using GFL (Generative Feedback Loops),
-LSE (Learning to Self-Evolve), and Trace2Skill for pattern consolidation.
+**Core value**: Start from a **zero-shot prompt** → automatically evolve to a
+**GEPA-optimized MultiChainComparison agent stack** — no human intervention.
 
-Instead of hardcoded agents, the meta-agent analyzes the task, generates agent
-definitions (RLM, ReAct, CodeAct, or ChainOfThought), optimizes them via GFL,
-runs them through an LSE-optimized loop with MultiChainComparison, and consolidates
-patterns into reusable skills.
+The meta-agent analyzes a task, generates specialized agents (RLM, ReAct, CodeAct,
+or ChainOfThought), then runs them through a **Generative Feedback Loop** that
+progressively optimizes prompts and demonstrations from BootstrapFewShot through
+MIPROv2 to GEPA. The result is an agent system that improves itself without manual
+prompt engineering.
+
+```
+Zero-Shot Prompt
+    → BootstrapFewShot (trace → demos)
+    → MIPROv2 (instruction + demo search)
+    → GEPA (reflective prompt evolution)
+    → GEPA → BootstrapFewShot (sequential chaining)
+    → MultiChainComparison agent selection
+```
 
 ## DSPy Features Used
 
