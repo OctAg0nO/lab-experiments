@@ -4,8 +4,8 @@ Generates specialized DSPy agents **on the fly** using GFL (Generative Feedback 
 LSE (Learning to Self-Evolve), and Trace2Skill for pattern consolidation.
 
 Instead of hardcoded agents, the meta-agent analyzes the task, generates agent
-definitions (ReAct, CodeAct, or ChainOfThought), optimizes them via GFL, runs
-them through an LSE-optimized loop with MultiChainComparison, and consolidates
+definitions (RLM, ReAct, CodeAct, or ChainOfThought), optimizes them via GFL,
+runs them through an LSE-optimized loop with MultiChainComparison, and consolidates
 patterns into reusable skills.
 
 ## DSPy Features Used
@@ -13,8 +13,9 @@ patterns into reusable skills.
 | Module | Usage |
 |--------|-------|
 | `dspy.ChainOfThought` | Task analysis, quality evaluation, rule extraction |
+| `dspy.RLM` | REPL-based agents: code execution, MCP tools, sub-LLM queries |
 | `dspy.ReAct` | Tool-using generated agents (max_iters=10) |
-| `dspy.CodeAct` | Code-capable agents with tool integration |
+| `dspy.CodeAct` | Code-capable agents without external tools |
 | `dspy.BestOfN` | Sample 3 task analyses, pick best by agent count |
 | `dspy.MultiChainComparison` | Compare 3 candidate agents for selection |
 | `dspy.Refine` | Iterative prompt improvement (N=3) |
@@ -33,10 +34,10 @@ flowchart TB
     U[User Task] --> BestN[BestOfN 3 candidates]
     BestN --> A[AnalyzeTask DSPy]
     A --> G[AgentGenerator]
-    G -->|ReAct / CodeAct / CoT| S[AgentStack]
+    G -->|RLM / ReAct / CodeAct / CoT| S[AgentStack]
 
     S -->|MultiChainComparison| M[MetaAgent Loop]
-    M -->|Refine improve| M
+    M -->|Refine improve prompts| M
     M -->|LSE record| F[InMemoryFrontier]
     F --> M
     M -->|InferRules| R[Extracted Rules]
@@ -52,7 +53,7 @@ flowchart TB
 ├── cli.py                        # Click CLI: 6 commands
 ├── meta/
 │   ├── agent_stack.py            # AgentEntry + AgentStack
-│   ├── agent_generator.py        # BestOfN + ReAct + CodeAct generation
+│   ├── agent_generator.py        # BestOfN + RLM + ReAct + CodeAct gen
 │   └── meta_agent.py             # MultiChainComparison + Refine + InferRules
 ├── evolution/
 │   ├── gfl.py                    # GFL pipeline (BootstrapFewShot, MIPROv2, GEPA, Sequential)
@@ -124,7 +125,7 @@ References: [GFL blog post](https://octagono.org/blog/dspy-generative-feedback-l
 | Aspect | 10_dapr_deep_research | 11_meta_agent |
 |--------|----------------------|---------------|
 | Agents | Fixed Explorer/DeepReader/Synthesizer/Critic | **Generated on the fly** via BestOfN |
-| Agent types | DurableAgent subclasses | ReAct (tools), CodeAct, or ChainOfThought |
+| Agent types | DurableAgent subclasses | **RLM** (code+tools) → **ReAct** (tools) → **CodeAct** (code) → **CoT** (default) |
 | Selection | Hardcoded `if/elif` | **MultiChainComparison** (3 candidates) |
 | Optimization | BootstrapFewShot only | **GFL pipeline**: BootstrapFewShot, MIPROv2, GEPA, Sequential |
 | Adaptation | Manual code changes | Dynamic via **Refine** + InferRules |
