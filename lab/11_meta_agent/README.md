@@ -171,6 +171,7 @@ After a `run` pipeline, `MetaAgent.evaluate_self()` returns:
 
 ## References
 
+- **Blog Post**: [Meta-Agent: Dynamic Agent Generation with DSPy](https://octagono.org/blog/meta-agent-dspy/)
 - **GFL**: [DSPy Generative Feedback Loops](https://octagono.org/blog/dspy-generative-feedback-loops/)
 - **LSE** — Chen et al., 2026: [Learning to Self-Evolve](https://arxiv.org/abs/2603.18620)
 - **Trace2Skill** — Ni et al., 2026: [Distill Trajectory-Local Lessons](https://arxiv.org/abs/2603.25158)
