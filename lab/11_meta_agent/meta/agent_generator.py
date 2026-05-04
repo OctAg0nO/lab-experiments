@@ -119,7 +119,7 @@ class AgentGenerator:
             },
         ]
 
-    # -- module generation: ReAct + RLM + tools --
+    # -- module generation: RLM + ReAct + CodeAct + CoT --
 
     def generate_module(self, entry: AgentEntry) -> dspy.Module:
         if entry.name in self._module_cache:
@@ -129,10 +129,12 @@ class AgentGenerator:
         tools = _build_tools(entry.tools, self._bridge)
 
         if entry.use_code and tools:
-            # CodeAct: tool-use via code actions (best for coding agents)
-            module = dspy.CodeAct(
+            # RLM: REPL-based agent with code execution, MCP tools, and sub-LLM queries
+            module = dspy.RLM(
                 "task: str -> result: str",
                 tools=tools,
+                max_iterations=10,
+                max_llm_calls=16,
             )
         elif tools:
             # ReAct: agentic loop with tools (thought + action + observation)
@@ -141,8 +143,11 @@ class AgentGenerator:
                 tools=tools,
                 max_iters=10,
             )
+        elif entry.use_code:
+            # CodeAct: tool-use via code actions (code-capable, no external tools)
+            module = dspy.CodeAct("task: str -> result: str")
         else:
-            # Plain ChainOfThought for simple agents
+            # Plain ChainOfThought for simple reasoning agents
             sig_cls = type(
                 entry.name,
                 (dspy.Signature,),
