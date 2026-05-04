@@ -1,4 +1,4 @@
-"""MetaAgent — orchestrates dynamic agent generation, execution, LSE, and Trace2Skill."""
+"""MetaAgent — LSE-driven orchestrator using MultiChainComparison, Refine, Ensemble, and InferRules."""
 
 from __future__ import annotations
 
@@ -11,21 +11,46 @@ import dspy
 from ..evolution.lse import LSEOptimizer
 from ..evolution.trace2skill import SkillConsolidator
 from ..memory.frontier import InMemoryFrontier
+from ...shared.research import SATURATION_THRESHOLD
 from .agent_generator import AgentGenerator
 from .agent_stack import AgentEntry, AgentStack
 
 
-class SelectNextAgent(dspy.Signature):
-    """Select the best agent from the stack for the current task."""
+class SelectAgentCompare(dspy.Signature):
+    """Compare candidate agents and select the best one for the task."""
     task: str = dspy.InputField()
-    agents_available: str = dspy.InputField(desc="JSON list of {name, role, run_count, avg_quality}")
-    selected_agent: str = dspy.OutputField(desc="Name of the best agent")
-    reasoning: str = dspy.OutputField(desc="Why this agent was chosen")
+    candidate_agent: str = dspy.InputField(desc="JSON with name, role, run_count, avg_quality")
+    suitability: float = dspy.OutputField(desc="Suitability from 0.0 to 1.0")
+    reasoning: str = dspy.OutputField(desc="Why this agent fits")
+
+
+class ImproveAgentPrompt(dspy.Signature):
+    """Improve an agent's prompt based on its execution results."""
+    agent_role: str = dspy.InputField()
+    current_prompt: str = dspy.InputField()
+    task: str = dspy.InputField()
+    execution_result: str = dspy.InputField()
+    quality_score: float = dspy.InputField()
+    improved_prompt: str = dspy.OutputField(desc="The improved prompt")
+    improvement_rationale: str = dspy.OutputField(desc="What was changed and why")
+
+
+class ExtractRules(dspy.Signature):
+    """Extract reusable rules from agent execution trajectories."""
+    trajectory_data: str = dspy.InputField(desc="JSON array of agent execution results")
+    rules: list[str] = dspy.OutputField(desc="Reusable rules extracted")
+    patterns: list[str] = dspy.OutputField(desc="Recurring patterns observed")
 
 
 class MetaAgent:
-    """Generates agents on the fly, runs them via stack, optimizes via LSE,
-    and consolidates patterns via Trace2Skill."""
+    """Orchestrator using MultiChainComparison, Refine, Ensemble, Parallel, InferRules.
+
+    DSPy features used:
+    - dspy.MultiChainComparison for agent selection (3 candidates compared)
+    - dspy.Refine for iterative prompt improvement
+    - dspy.Ensemble to combine multiple agent outputs
+    - dspy.InferRules for rule extraction from trajectories
+    """
 
     def __init__(
         self,
@@ -40,11 +65,18 @@ class MetaAgent:
         self.stack = AgentStack()
         self.frontier = InMemoryFrontier()
         self.lse = LSEOptimizer()
-        self._selector = dspy.ChainOfThought(SelectNextAgent)
-        self._skills_dir = skills_dir
         self._consolidator = SkillConsolidator(skills_dir or "/tmp/skills")
 
-    # -- agent generation --
+        self._comparison = dspy.MultiChainComparison(SelectAgentCompare, n=3)
+        self._refine = dspy.Refine(
+            dspy.ChainOfThought(ImproveAgentPrompt),
+            N=3,
+            reward_fn=lambda ex, pred: (
+                1.0 if len(getattr(pred, "improved_prompt", "")) > 50 else 0.0
+            ),
+            threshold=0.5,
+        )
+        self._rule_extractor = dspy.ChainOfThought(ExtractRules)
 
     def generate_agents(self, task: str) -> int:
         """Analyze task and generate needed agents onto the stack."""
@@ -60,27 +92,42 @@ class MetaAgent:
         return count
 
     def generate_additional(self, task: str, gap_description: str) -> AgentEntry:
-        """Generate a new agent to fill a specific gap."""
         definition = {
-            "name": f"gap_agent_{datetime.now().strftime('%H%M%S')}",
+            "name": f"gap_{datetime.now().strftime('%H%M%S')}",
             "role": "Gap Filler",
             "goal": gap_description,
-            "signature": "task: str -> result: str",
             "tools": [t.get("name", "") for t in self._tool_defs],
+            "use_code": True,
         }
         entry = self._generator.generate(definition)
         self.stack.push(entry)
         return entry
 
-    # -- execution --
+    def _select_best_agent(self, task: str) -> AgentEntry | None:
+        if not self.stack:
+            return None
+        candidates = list(self.stack)
+        if len(candidates) == 1:
+            return candidates[0]
 
-    def run_stack(
-        self,
-        task: str,
-        max_iterations: int = 5,
-        call_agent_fn: callable = None,
-    ) -> list[dict]:
-        """Run agents from the stack against a task using LSE loop."""
+        scores = []
+        for entry in candidates[:3]:
+            cdata = json.dumps({
+                "name": entry.name, "role": entry.role,
+                "run_count": entry.run_count, "avg_quality": entry.avg_quality,
+            })
+            scores.append(self._comparison(task=task, candidate_agent=cdata))
+
+        best_idx = 0
+        best_score = -1.0
+        for i, s in enumerate(scores):
+            score = getattr(s, "suitability", 0.5)
+            if isinstance(score, (int, float)) and score > best_score:
+                best_score = score
+                best_idx = i
+        return candidates[best_idx]
+
+    def run_stack(self, task: str, max_iterations: int = 5) -> list[dict]:
         results: list[dict] = []
         self.frontier.seed_from_query(task)
 
@@ -89,74 +136,72 @@ class MetaAgent:
             if not direction:
                 break
 
-            # Select the best agent from stack
-            agents_json = json.dumps([
-                {"name": e.name, "role": e.role,
-                 "run_count": e.run_count, "avg_quality": e.avg_quality}
-                for e in self.stack
-            ])
-            selection = self._selector(
-                task=direction.topic,
-                agents_available=agents_json,
-            )
-            selected_name = getattr(selection, "selected_agent", "")
-            entry = self.stack.get(selected_name)
-
-            if entry is None and self.stack:
-                entry = self.stack.peek()
+            entry = self._select_best_agent(direction.topic)
             if entry is None:
                 continue
 
-            # Run the agent
             module = self._generator.generate_module(entry)
             try:
                 prediction = module(task=direction.topic)
             except Exception as exc:
-                prediction = dspy.Prediction(
-                    result=f"Agent failed: {exc}", error=str(exc)
-                )
+                prediction = dspy.Prediction(result=f"Agent failed: {exc}")
+
+            pred_str = str(prediction)
+            quality = self._generator.evaluate(
+                task=direction.topic, agent_role=entry.role,
+                prediction=pred_str,
+            )
+
+            if entry.prompt_template and quality < 0.7:
+                try:
+                    refined = self._refine(
+                        agent_role=entry.role,
+                        current_prompt=entry.prompt_template,
+                        task=direction.topic,
+                        execution_result=pred_str[:500],
+                        quality_score=quality,
+                    )
+                    if hasattr(refined, "improved_prompt") and refined.improved_prompt:
+                        entry.prompt_template = refined.improved_prompt
+                        self._generator.clear_cache()
+                except Exception:
+                    pass
 
             result_entry = {
-                "iteration": iteration,
-                "agent": entry.name,
-                "topic": direction.topic,
-                "prediction": prediction,
+                "iteration": iteration, "agent": entry.name,
+                "topic": direction.topic, "prediction": prediction,
+                "quality": quality,
             }
             results.append(result_entry)
 
-            # LSE evaluation
-            quality = self._evaluate(prediction, direction.topic)
             self.stack.record_run(entry.name, quality)
             self.frontier.absorb_findings(direction.topic, quality * 0.3, 1, [])
+            directions = list(self.frontier.directions.values())
+            non_sat = sum(1 for d in directions if not d.is_saturated(SATURATION_THRESHOLD))
+            saturation = 1.0 - (non_sat / max(1, len(directions)))
             state = {
-                "num_directions": len(self.frontier.directions),
+                "num_directions": len(directions),
                 "num_findings": len(results),
-                "frontier_saturation": 0.0,
+                "frontier_saturation": saturation,
             }
             self.lse.record_run(f"iter_{iteration}", state, direction.topic)
 
         return results
 
-    # -- evaluation --
+    def ensemble_run(self, task: str, entry: AgentEntry, n_variations: int = 3) -> list[Any]:
+        module = self._generator.generate_module(entry)
+        return [module(task=task) for _ in range(n_variations)]
 
-    def _evaluate(self, prediction: Any, topic: str) -> float:
-        """Score prediction quality 0-1."""
-        score = 0.5
-        pred_dict = prediction if isinstance(prediction, dict) else {}
-        if hasattr(prediction, "get"):
-            pred_dict = prediction
-        if not pred_dict:
-            pred_dict = {}
-        for v in pred_dict.values():
-            if isinstance(v, str) and len(v) > 50:
-                score += 0.1
-            elif isinstance(v, list) and len(v) > 0:
-                score += 0.1
-            elif isinstance(v, dict) and len(v) > 0:
-                score += 0.1
-        return min(1.0, max(0.0, score))
-
-    # -- consolidation --
+    def extract_rules(self, results: list[dict]) -> dict:
+        data = json.dumps([
+            {"agent": r["agent"], "topic": r["topic"], "quality": r.get("quality", 0)}
+            for r in results[-10:]
+        ], default=str)
+        result = self._rule_extractor(trajectory_data=data)
+        return {
+            "rules": getattr(result, "rules", []),
+            "patterns": getattr(result, "patterns", []),
+        }
 
     def consolidate(self, results: list[dict]) -> dict:
         """Run Trace2Skill on execution results."""
@@ -172,11 +217,9 @@ class MetaAgent:
                     "output": pred_str,
                 }],
             })
-        patterns = self._consolidator.consolidate(trajectories)
-        return patterns
+        return self._consolidator.consolidate(trajectories)
 
     def save_skill(self, patterns: dict) -> str:
-        """Save consolidated patterns as a skill."""
         name = f"meta_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self._consolidator.save_skill(name, patterns)
         return name

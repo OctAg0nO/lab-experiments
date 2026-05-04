@@ -12,9 +12,10 @@ class AgentEntry:
     name: str
     role: str
     goal: str
-    signature: str  # DSPy signature string (e.g. "task -> result")
-    tools: list[str]  # tool names this agent uses
-    prompt_template: str
+    signature: str
+    tools: list[str]
+    use_code: bool = False
+    prompt_template: str = ""
     created_at: str = ""
     run_count: int = 0
     avg_quality: float = 0.0
@@ -38,6 +39,8 @@ class AgentStack:
     # -- stack operations --
 
     def push(self, entry: AgentEntry) -> None:
+        if entry.name in self._by_name:
+            raise ValueError(f"Agent '{entry.name}' already exists on stack")
         self._entries.append(entry)
         self._by_name[entry.name] = entry
 

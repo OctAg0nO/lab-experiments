@@ -1,10 +1,15 @@
-"""AgentGenerator — dynamically creates DSPy agents for a given task."""
+"""AgentGenerator — dynamically creates DSPy agents using ReAct, BestOfN, and tool integration."""
 
 from __future__ import annotations
+
+import json
+import logging
 
 import dspy
 
 from .agent_stack import AgentEntry
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyzeTask(dspy.Signature):
@@ -12,99 +17,155 @@ class AnalyzeTask(dspy.Signature):
     task: str = dspy.InputField()
     num_agents: int = dspy.OutputField(desc="How many distinct sub-agents needed")
     agent_definitions: str = dspy.OutputField(
-        desc="JSON list: [{\"name\", \"role\", \"goal\", \"signature\", \"tools\"}]"
+        desc="JSON list: [{\"name\", \"role\", \"goal\", \"tools\", \"use_code\"}]"
     )
 
 
-class GenerateSignature(dspy.Signature):
-    """Generate a DSPy signature string for a given agent role and goal."""
-    role: str = dspy.InputField()
-    goal: str = dspy.InputField(desc="What this agent should accomplish")
-    available_tools: str = dspy.InputField(desc="Available MCP tools JSON")
-    dspy_signature: str = dspy.OutputField(desc="DSPy signature like 'input_field -> output_field'")
-    input_field: str = dspy.OutputField(desc="Input field name and type")
-    output_field: str = dspy.OutputField(desc="Output field name and type")
+class EvaluateQuality(dspy.Signature):
+    """Evaluate the quality of an agent's prediction for a research task."""
+    task: str = dspy.InputField()
+    agent_role: str = dspy.InputField()
+    prediction: str = dspy.InputField(desc="The agent's output")
+    quality_score: float = dspy.OutputField(desc="Quality from 0.0 to 1.0")
+    reasoning: str = dspy.OutputField(desc="Why this score was given")
+
+
+def _build_tools(tool_names: list[str], bridge) -> list:
+    """Build DSPy tool callables from MCP bridge for a list of tool names."""
+    if not bridge:
+        return []
+    all_fns = bridge.get_dspy_tools()
+    if not tool_names:
+        return all_fns
+    return [fn for fn in all_fns if fn.__name__ in tool_names]
 
 
 class AgentGenerator:
-    """Uses DSPy CoT to analyze tasks and generate agent definitions on the fly."""
+    """Generates DSPy agents using BestOfN, ReAct, and tool integration.
 
-    def __init__(self, llm: dspy.LM, tool_defs: list[dict] | None = None):
-        self._analyzer = dspy.ChainOfThought(AnalyzeTask)
-        self._sig_gen = dspy.ChainOfThought(GenerateSignature)
+    DSPy features used:
+    - dspy.ChainOfThought for task analysis
+    - dspy.BestOfN to sample multiple candidates and pick the best
+    - dspy.ReAct for tool-using agents (vs plain ChainOfThought)
+    - dspy.PythonInterpreter for code-capable agents
+    """
+
+    def __init__(self, llm: dspy.LM, tool_defs: list[dict] | None = None, bridge=None):
         self._llm = llm
         self._tool_defs = tool_defs or []
+        self._bridge = bridge
+        self._module_cache: dict[str, dspy.Module] = {}
+        self._evaluator = dspy.ChainOfThought(EvaluateQuality)
+
+        # Use BestOfN to sample 3 candidate analyses, pick best by number of agents
+        self._analyzer = dspy.BestOfN(
+            dspy.ChainOfThought(AnalyzeTask),
+            N=3,
+            reward_fn=lambda ex, pred: (
+                getattr(pred, "num_agents", 0)
+                if hasattr(pred, "agent_definitions") and pred.agent_definitions
+                else 0
+            ),
+            threshold=0.5,
+        )
+
+    # -- task analysis with BestOfN --
 
     def analyze(self, task: str) -> list[dict]:
-        """Determine what agents are needed for a task."""
-        result = self._analyzer(task=task)
-        if not hasattr(result, "agent_definitions") or not result.agent_definitions:
+        best = self._analyzer(task=task)
+        result = best if hasattr(best, "agent_definitions") else None
+        if not result or not result.agent_definitions:
+            logger.warning("AnalyzeTask returned no agent_definitions, using defaults")
             return self._default_agents(task)
-        import json
         try:
             agents = json.loads(result.agent_definitions)
-            return agents if isinstance(agents, list) else self._default_agents(task)
-        except (json.JSONDecodeError, TypeError):
+            if not isinstance(agents, list):
+                logger.warning("agent_definitions not a list, using defaults")
+                return self._default_agents(task)
+            return agents
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning("Failed to parse agent_definitions: %s", e)
             return self._default_agents(task)
 
+    # -- agent entry generation --
+
     def generate(self, definition: dict) -> AgentEntry:
-        """Generate a full AgentEntry from a definition dict."""
-        tools_json = str([t.get("name", t.get("server", "?")) for t in self._tool_defs])
-        sig_result = self._sig_gen(
-            role=definition.get("role", "assistant"),
-            goal=definition.get("goal", "help with the task"),
-            available_tools=tools_json,
-        )
-        signature = (
-            getattr(sig_result, "dspy_signature", "task -> result")
-            or "task -> result"
-        )
         return AgentEntry(
             name=definition.get("name", f"agent_{id(definition)}"),
             role=definition.get("role", "assistant"),
             goal=definition.get("goal", "help with the task"),
-            signature=signature,
+            signature="task -> result",
             tools=definition.get("tools", []),
+            use_code=definition.get("use_code", False),
             prompt_template=definition.get("prompt", ""),
         )
 
     def _default_agents(self, task: str) -> list[dict]:
-        """Fallback agents when LLM analysis fails."""
         return [
             {
-                "name": "searcher",
-                "role": "Web Researcher",
+                "name": "searcher", "role": "Web Researcher",
                 "goal": f"Search and gather information about: {task}",
-                "signature": "query: str -> findings: str",
-                "tools": ["search", "fetch", "md"],
+                "tools": ["search", "fetch", "md"], "use_code": False,
             },
             {
-                "name": "analyzer",
-                "role": "Content Analyst",
+                "name": "analyzer", "role": "Content Analyst",
                 "goal": f"Analyze and extract insights from research about: {task}",
-                "signature": "content: str -> insights: str, gaps: str",
-                "tools": ["chat"],
+                "tools": ["chat"], "use_code": False,
             },
             {
-                "name": "synthesizer",
-                "role": "Research Synthesizer",
+                "name": "synthesizer", "role": "Research Synthesizer",
                 "goal": f"Synthesize findings into coherent report about: {task}",
-                "signature": "findings: str -> report: str, key_points: list[str]",
-                "tools": [],
+                "tools": [], "use_code": True,
             },
         ]
 
+    # -- module generation: ReAct + RLM + tools --
+
     def generate_module(self, entry: AgentEntry) -> dspy.Module:
-        """Create an executable DSPy module from an AgentEntry."""
-        sig_field = entry.signature.replace("->", ",").replace(":", ",").split(",")
-        if len(sig_field) >= 4:
-            input_desc = sig_field[0].strip()
-            output_desc = sig_field[2].strip()
-            sig_str = f"{input_desc} -> {output_desc}"
-        else:
-            sig_str = entry.signature
+        if entry.name in self._module_cache:
+            return self._module_cache[entry.name]
 
         prompt = entry.prompt_template or f"You are {entry.role}. {entry.goal}"
-        sig = dspy.Signature(sig_str)
-        sig.__doc__ = prompt
-        return dspy.ChainOfThought(sig)
+        tools = _build_tools(entry.tools, self._bridge)
+
+        if entry.use_code and tools:
+            # CodeAct: tool-use via code actions (best for coding agents)
+            module = dspy.CodeAct(
+                "task: str -> result: str",
+                tools=tools,
+            )
+        elif tools:
+            # ReAct: agentic loop with tools (thought + action + observation)
+            module = dspy.ReAct(
+                "task: str -> result: str",
+                tools=tools,
+                max_iters=10,
+            )
+        else:
+            # Plain ChainOfThought for simple agents
+            sig_cls = type(
+                entry.name,
+                (dspy.Signature,),
+                {"__doc__": prompt, "task": dspy.InputField(), "result": dspy.OutputField()},
+            )
+            module = dspy.ChainOfThought(sig_cls)
+
+        self._module_cache[entry.name] = module
+        return module
+
+    # -- quality evaluation --
+
+    def evaluate(self, task: str, agent_role: str, prediction: str) -> float:
+        result = self._evaluator(
+            task=task,
+            agent_role=agent_role,
+            prediction=str(prediction)[:1000],
+        )
+        if hasattr(result, "quality_score"):
+            return max(0.0, min(1.0, float(result.quality_score)))
+        return 0.5
+
+    # -- module lifecycle --
+
+    def clear_cache(self):
+        self._module_cache.clear()
