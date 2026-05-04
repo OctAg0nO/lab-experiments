@@ -1,155 +1,139 @@
-# 11 — Meta-Agent: Dynamic Agent Generation with LSE + Trace2Skill
+# 11 — Meta-Agent: Dynamic Agent Generation with DSPy 3.2
 
-Generates specialized DSPy agents **on the fly** using LSE (Learning to Self-Evolve)
-for iterative improvement and Trace2Skill for pattern consolidation.
+Generates specialized DSPy agents **on the fly** using GFL (Generative Feedback Loops),
+LSE (Learning to Self-Evolve), and Trace2Skill for pattern consolidation.
 
-Instead of hardcoded agents (fixed Explorer/DeepReader/Synthesizer/Critic), the
-meta-agent analyzes the task, generates agent definitions via DSPy ChainOfThought,
-runs them through an LSE-optimized loop, and consolidates what it learns into
-reusable skills.
+Instead of hardcoded agents, the meta-agent analyzes the task, generates agent
+definitions (ReAct, CodeAct, or ChainOfThought), optimizes them via GFL, runs
+them through an LSE-optimized loop with MultiChainComparison, and consolidates
+patterns into reusable skills.
+
+## DSPy Features Used
+
+| Module | Usage |
+|--------|-------|
+| `dspy.ChainOfThought` | Task analysis, quality evaluation, rule extraction |
+| `dspy.ReAct` | Tool-using generated agents (max_iters=10) |
+| `dspy.CodeAct` | Code-capable agents with tool integration |
+| `dspy.BestOfN` | Sample 3 task analyses, pick best by agent count |
+| `dspy.MultiChainComparison` | Compare 3 candidate agents for selection |
+| `dspy.Refine` | Iterative prompt improvement (N=3) |
+| `dspy.Ensemble` | Multiple prediction aggregation |
+| `dspy.BootstrapFewShot` | Trace -> demo pipeline (GFL) |
+| `dspy.MIPROv2` | Instruction + demo Bayesian optimization (GFL) |
+| `dspy.GEPA` | Reflective prompt evolution via Pareto frontier (GFL) |
+| `dspy.Evaluate` | Program evaluation harness |
+| `dspy.Signature` + `BAMLAdapter` | Dynamic signature subclass creation via `type()` |
+| `dspy.InferRules` | Rule induction from execution trajectories |
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    U[User Task] --> A[AnalyzeTask DSPy CoT]
-    A -->|agent definitions| G[AgentGenerator]
-    G -->|AgentEntry list| S[AgentStack push/pop/query]
+    U[User Task] --> BestN[BestOfN 3 candidates]
+    BestN --> A[AnalyzeTask DSPy]
+    A --> G[AgentGenerator]
+    G -->|ReAct / CodeAct / CoT| S[AgentStack]
 
-    S -->|select best| M[MetaAgent Loop]
-    M -->|generate module| M2[DSPy ChainOfThought]
-    M2 -->|result| LSE[LSEOptimizer QualityEvaluation]
-    LSE -->|quality score| S
-    LSE -->|record run| F[InMemoryFrontier UCB selection]
+    S -->|MultiChainComparison| M[MetaAgent Loop]
+    M -->|Refine improve| M
+    M -->|LSE record| F[InMemoryFrontier]
+    F --> M
+    M -->|InferRules| R[Extracted Rules]
 
-    F -->|next direction| M
-    M -->|trajectories| T[SkillConsolidator Trace2Skill]
-    T -->|patterns| SK[(Saved Skills)]
+    M -->|trajectories| T[SkillConsolidator]
+    T --> SK[(Saved Skills)]
+
+    GFL[GFL Pipeline] -->|BootstrapFewShot / MIPROv2 / GEPA| G
 ```
 
 ```
 11_meta_agent/
-├── cli.py                        # Click CLI: generate, run, stack, distill
+├── cli.py                        # Click CLI: 6 commands
 ├── meta/
-│   ├── agent_stack.py            # AgentEntry + AgentStack (push/pop/query by role/goal)
-│   ├── agent_generator.py        # AnalyzeTask + GenerateSignature DSPy signatures
-│   └── meta_agent.py             # MetaAgent orchestrator (LSE + Stack + Trace2Skill)
-├── evolution/                    # From lab 10: LSEOptimizer, SkillConsolidator
-├── memory/                       # From lab 10: InMemoryFrontier, NoopStore
-├── mcp/                          # From lab 10: MCPClient, MCPBridge
+│   ├── agent_stack.py            # AgentEntry + AgentStack
+│   ├── agent_generator.py        # BestOfN + ReAct + CodeAct generation
+│   └── meta_agent.py             # MultiChainComparison + Refine + InferRules
+├── evolution/
+│   ├── gfl.py                    # GFL pipeline (BootstrapFewShot, MIPROv2, GEPA, Sequential)
+│   ├── lse.py                    # LSEOptimizer (from lab 10)
+│   └── trace2skill.py            # SkillConsolidator (from lab 10)
+├── memory/                       # InMemoryFrontier, NoopStore (from lab 10)
+├── mcp/                          # MCPClient, MCPBridge (from lab 10)
 └── config/
-    └── mcp_servers.json          # MCP server definitions (crawl4ai, fetch)
+    └── mcp_servers.json          # MCP server definitions
 ```
 
-## How It Works
-
-### 1. Task Analysis
-
-```
-Input: "Research transformer attention mechanisms"
-
-AnalyzeTask DSPy CoT → 3 agents needed:
-  - searcher:     "Search papers about transformer attention"
-  - analyzer:     "Extract key insights from papers"
-  - synthesizer:  "Synthesize findings into a coherent report"
-```
-
-### 2. Signature Generation
-
-For each agent definition, `GenerateSignature` creates a DSPy-compatible signature:
-
-```
-searcher:     query: str -> findings: str
-analyzer:     content: str -> insights: str, gaps: str
-synthesizer:  findings: str -> report: str, key_points: list[str]
-```
-
-### 3. Execution Loop
-
-```
-1. Frontier selects next direction (UCB score)
-2. SelectNextAgent picks best agent from stack
-3. AgentGenerator.generate_module() creates a dspy.ChainOfThought
-4. Module executes → LSE records quality score
-5. Frontier absorbs findings (confidence update)
-6. Repeat until saturated or iterations exhausted
-```
-
-### 4. Consolidation
-
-All trajectories are fed to SkillConsolidator (Trace2Skill), which extracts
-error patterns and success patterns via `dspy.ChainOfThought(ExtractPatterns)`.
-The resulting patterns are saved as a named skill.
-
-## Key Difference from lab 10
-
-| Aspect | 10_dapr_deep_research | 11_meta_agent |
-|--------|----------------------|---------------|
-| Agents | Explorer, DeepReader, Synthesizer, Critic | **Generated on the fly** per task |
-| Agent definition | Fixed `DurableAgent` subclass | `AgentEntry` dataclass (name, role, goal, signature, tools) |
-| Selection | Hardcoded `if/elif` dispatch | `SelectNextAgent` DSPy ChainOfThought |
-| Adaptation | Manual code changes | Dynamic via **`GenerateSignature`** DSPy module |
-| Infrastructure | Dapr + Redis + Docker | **Pure DSPy** (NoopStore, no Dapr) |
-
-## CLI Reference
+## CLI Commands
 
 ```bash
-# Global options
 uv run python -m lab.11_meta_agent [OPTIONS] COMMAND [ARGS]...
 
 Options:
   -q, --query TEXT          Task description
-  -i, --iterations INTEGER  Max research iterations  [default: 5]
+  -i, --iterations INTEGER  Max iterations  [default: 5]
   --help                    Show this message and exit.
 
 Commands:
   generate  Analyze task and generate agents onto the stack
-  run       Full pipeline: generate → run stack → LSE → consolidate
-  stack     Inspect current agent stack
-  distill   Teacher → student compilation for generated agents
+  run       Full pipeline: generate -> run stack -> LSE -> consolidate
+  optimize  Optimize generated agents via GEPA
+  gfl       Run full GFL pipeline (BootstrapFewShot, MIPROv2, GEPA)
+  stack     Inspect agent stack
+  distill   Teacher -> student compilation
 ```
 
 ### Examples
 
 ```bash
-# Generate + inspect agents for a task
+# Generate agents using BestOfN analysis
 uv run python -m lab.11_meta_agent \
-  --query "Build a RAG pipeline with DSPy and ColBERTv2" generate
+  --query "Build a RAG pipeline with DSPy" generate
 
-# Full meta-agent pipeline with 10 iterations
+# Full pipeline: generate -> run -> LSE -> consolidate
 uv run python -m lab.11_meta_agent \
-  --query "Compare attention mechanisms in transformers" \
-  --iterations 10 run
+  --query "Compare attention mechanisms" --iterations 10 run
 
-# Check what agents are on the stack
-uv run python -m lab.11_meta_agent stack
+# GFL optimization (BootstrapFewShot + MIPROv2 + GEPA)
+uv run python -m lab.11_meta_agent \
+  --query "Classify user intent" gfl
 
-# Distill generated agents to a smaller model
+# GEPA prompt evolution for generated agents
+uv run python -m lab.11_meta_agent \
+  --query "Research transformers" optimize
+
+# Distill to student model
 uv run python -m lab.11_meta_agent distill
 ```
 
-## Core Components
+## How the GFL Pipeline Works
 
-### `meta/agent_stack.py`
+The pipeline in `evolution/gfl.py` runs all optimizers and compares results:
 
-- **`AgentEntry`**: dataclass with `name`, `role`, `goal`, `signature` (DSPy field spec),
-  `tools` (MCP tool names), `run_count`, `avg_quality`
-- **`AgentStack`**: push/pop/peek registry with query by role/goal, run tracking
+1. **Baseline**: no optimization
+2. **BootstrapFewShot**: trace -> keep passing demos -> attach to program
+3. **MIPROv2**: bootstrap demos -> propose instruction variants -> Bayesian search
+4. **GEPA**: execute -> read traces -> diagnose failures -> mutate instructions -> Pareto select
+5. **Sequential**: GEPA (prompts) -> BootstrapFewShot (demos)
 
-### `meta/agent_generator.py`
+References: [GFL blog post](https://octagono.org/blog/dspy-generative-feedback-loops/),
+[lab 07](../../07-generative-feedback-loops/)
 
-- **`AnalyzeTask`**: DSPy signature — determines how many and what kind of agents
-- **`GenerateSignature`**: DSPy signature — generates DSPy-compatible field spec
-- **`AgentGenerator`**: orchestrates analysis, creates `AgentEntry` objects,
-  builds `dspy.Module` instances with `dspy.ChainOfThought`
+## Key Differences from lab 10
 
-### `meta/meta_agent.py`
-
-- **`SelectNextAgent`**: DSPy signature — picks best agent from stack for current task
-- **`MetaAgent`**: orchestrates the full loop:
-  `generate → stack → frontier → select → execute → LSE → consolidate`
+| Aspect | 10_dapr_deep_research | 11_meta_agent |
+|--------|----------------------|---------------|
+| Agents | Fixed Explorer/DeepReader/Synthesizer/Critic | **Generated on the fly** via BestOfN |
+| Agent types | DurableAgent subclasses | ReAct (tools), CodeAct, or ChainOfThought |
+| Selection | Hardcoded `if/elif` | **MultiChainComparison** (3 candidates) |
+| Optimization | BootstrapFewShot only | **GFL pipeline**: BootstrapFewShot, MIPROv2, GEPA, Sequential |
+| Adaptation | Manual code changes | Dynamic via **Refine** + InferRules |
+| Task analysis | None (agents predefined) | **BestOfN** over 3 candidate analyses |
+| Infrastructure | Dapr + Redis + Docker | **Pure DSPy** (NoopStore, no Dapr) |
+| Signatures | Static classes | Dynamic `type()` subclasses via BAMLAdapter |
 
 ## References
 
+- **GFL**: [DSPy Generative Feedback Loops](https://octagono.org/blog/dspy-generative-feedback-loops/)
 - **LSE** — Chen et al., 2026: [Learning to Self-Evolve](https://arxiv.org/abs/2603.18620)
 - **Trace2Skill** — Ni et al., 2026: [Distill Trajectory-Local Lessons](https://arxiv.org/abs/2603.25158)
