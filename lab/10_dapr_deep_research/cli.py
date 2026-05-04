@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 
@@ -137,7 +137,7 @@ def mission(ctx: click.Context):
     console.print("\n[bold cyan][1/4][/] Connecting MCP tools...")
     client = MCPClient(str(CONFIG_PATH))
     tool_defs = client.connect_all()
-    bridge = MCPBridge(client, tool_defs)
+    MCPBridge(client, tool_defs)
     console.print(f"  {len(tool_defs)} tool(s) discovered")
 
     console.print("\n[bold cyan][2/4][/] GFL optimization (BootstrapFewShot)...")
