@@ -12,18 +12,18 @@ reusable skills.
 
 ```mermaid
 flowchart TB
-    U[User Task] --> A[AnalyzeTask<br/>DSPy CoT]
+    U[User Task] --> A[AnalyzeTask DSPy CoT]
     A -->|agent definitions| G[AgentGenerator]
-    G -->|AgentEntry[]| S[AgentStack<br/>push/pop/query]
+    G -->|AgentEntry list| S[AgentStack push/pop/query]
 
     S -->|select best| M[MetaAgent Loop]
-    M -->|generate module| M2[DSPy<br/>ChainOfThought]
-    M2 -->|result| LSE[LSEOptimizer<br/>QualityEvaluation]
+    M -->|generate module| M2[DSPy ChainOfThought]
+    M2 -->|result| LSE[LSEOptimizer QualityEvaluation]
     LSE -->|quality score| S
-    LSE -->|record run| F[InMemoryFrontier<br/>UCB selection]
+    LSE -->|record run| F[InMemoryFrontier UCB selection]
 
     F -->|next direction| M
-    M -->|trajectories| T[SkillConsolidator<br/>Trace2Skill]
+    M -->|trajectories| T[SkillConsolidator Trace2Skill]
     T -->|patterns| SK[(Saved Skills)]
 ```
 
@@ -131,17 +131,20 @@ uv run python -m lab.11_meta_agent distill
 ## Core Components
 
 ### `meta/agent_stack.py`
+
 - **`AgentEntry`**: dataclass with `name`, `role`, `goal`, `signature` (DSPy field spec),
   `tools` (MCP tool names), `run_count`, `avg_quality`
 - **`AgentStack`**: push/pop/peek registry with query by role/goal, run tracking
 
 ### `meta/agent_generator.py`
+
 - **`AnalyzeTask`**: DSPy signature — determines how many and what kind of agents
 - **`GenerateSignature`**: DSPy signature — generates DSPy-compatible field spec
 - **`AgentGenerator`**: orchestrates analysis, creates `AgentEntry` objects,
   builds `dspy.Module` instances with `dspy.ChainOfThought`
 
 ### `meta/meta_agent.py`
+
 - **`SelectNextAgent`**: DSPy signature — picks best agent from stack for current task
 - **`MetaAgent`**: orchestrates the full loop:
   `generate → stack → frontier → select → execute → LSE → consolidate`
@@ -161,6 +164,7 @@ uv run python -m lab.11_meta_agent distill
 ├── mcp/                                 # Copied from 10: MCPClient, MCPBridge
 └── config/
     └── mcp_servers.json                 # MCP server definitions
+
 ```
 
 ### Key Difference from 10_dapr_deep_research
