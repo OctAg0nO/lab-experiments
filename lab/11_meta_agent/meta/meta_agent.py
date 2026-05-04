@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -14,6 +16,36 @@ from ..memory.frontier import InMemoryFrontier
 from ...shared.research import SATURATION_THRESHOLD
 from .agent_generator import AgentGenerator
 from .agent_stack import AgentEntry, AgentStack
+
+
+@dataclass
+class ResourceBudget:
+    """Budget limits for meta-agent execution. Raise if exceeded."""
+    max_llm_calls: int = 100
+    max_wall_seconds: int = 300
+    max_agents_generated: int = 10
+    max_iterations: int = 20
+    _start_time: float = field(default_factory=time.time)
+    _llm_calls_used: int = 0
+
+    def check_llm(self) -> None:
+        self._llm_calls_used += 1
+        if self._llm_calls_used > self.max_llm_calls:
+            raise RuntimeError(f"LLM call budget exceeded ({self.max_llm_calls})")
+
+    def check_time(self) -> None:
+        elapsed = time.time() - self._start_time
+        if elapsed > self.max_wall_seconds:
+            raise RuntimeError(f"Wall time budget exceeded ({self.max_wall_seconds}s)")
+
+    def check_agents(self, count: int) -> None:
+        if count > self.max_agents_generated:
+            raise RuntimeError(f"Agent count budget exceeded ({self.max_agents_generated})")
+
+    def check_all(self, agent_count: int = 0) -> None:
+        self.check_time()
+        if agent_count:
+            self.check_agents(agent_count)
 
 
 class SelectAgentCompare(dspy.Signature):
@@ -58,10 +90,12 @@ class MetaAgent:
         generator: AgentGenerator,
         tool_defs: list[dict] | None = None,
         skills_dir: str | None = None,
+        budget: ResourceBudget | None = None,
     ):
         self._llm = llm
         self._generator = generator
         self._tool_defs = tool_defs or []
+        self.budget = budget or ResourceBudget()
         self.stack = AgentStack()
         self.frontier = InMemoryFrontier()
         self.lse = LSEOptimizer()
@@ -79,10 +113,10 @@ class MetaAgent:
         self._rule_extractor = dspy.ChainOfThought(ExtractRules)
 
     def generate_agents(self, task: str) -> int:
-        """Analyze task and generate needed agents onto the stack."""
         definitions = self._generator.analyze(task)
         count = 0
         for definition in definitions:
+            self.budget.check_all(agent_count=count)
             name = definition.get("name", f"agent_{count}")
             if self.stack.get(name):
                 continue
@@ -130,8 +164,10 @@ class MetaAgent:
     def run_stack(self, task: str, max_iterations: int = 5) -> list[dict]:
         results: list[dict] = []
         self.frontier.seed_from_query(task)
+        max_iterations = min(max_iterations, self.budget.max_iterations)
 
         for iteration in range(max_iterations):
+            self.budget.check_all(agent_count=len(self.stack))
             direction = self.frontier.next_action()
             if not direction:
                 break
@@ -141,10 +177,16 @@ class MetaAgent:
                 continue
 
             module = self._generator.generate_module(entry)
+            if module is None:
+                self.stack.record_failure(entry.name)
+                continue
+
             try:
+                self.budget.check_llm()
                 prediction = module(task=direction.topic)
             except Exception as exc:
                 prediction = dspy.Prediction(result=f"Agent failed: {exc}")
+                self.stack.record_failure(entry.name)
 
             pred_str = str(prediction)
             quality = self._generator.evaluate(
@@ -190,6 +232,8 @@ class MetaAgent:
 
     def ensemble_run(self, task: str, entry: AgentEntry, n_variations: int = 3) -> list[Any]:
         module = self._generator.generate_module(entry)
+        if module is None:
+            return []
         return [module(task=task) for _ in range(n_variations)]
 
     def extract_rules(self, results: list[dict]) -> dict:
@@ -223,6 +267,37 @@ class MetaAgent:
         name = f"meta_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self._consolidator.save_skill(name, patterns)
         return name
+
+    def evaluate_self(self) -> dict:
+        """Meta-evaluation: measure how well agent generation and LSE performed."""
+        scores = [r.quality_score for r in self.lse.runs]
+        avg_quality = sum(scores) / len(scores) if scores else 0.0
+        quality_trend = self.lse.improvement_trend()
+        net_improvement = quality_trend[-1] if quality_trend else 0.0
+
+        agent_stats = []
+        for entry in self.stack:
+            total = entry.run_count + entry.failure_count
+            success_rate = entry.run_count / total if total > 0 else 0.0
+            agent_stats.append({
+                "name": entry.name,
+                "role": entry.role,
+                "avg_quality": round(entry.avg_quality, 3),
+                "success_rate": round(success_rate, 3),
+                "failures": entry.failure_count,
+            })
+
+        return {
+            "avg_quality": round(avg_quality, 3),
+            "net_improvement": round(net_improvement, 3),
+            "total_iterations": len(self.lse.runs),
+            "agents_generated": len(self.stack),
+            "budget_used": {
+                "llm_calls": self.budget._llm_calls_used,
+                "wall_seconds": round(time.time() - self.budget._start_time, 1),
+            },
+            "agent_stats": agent_stats,
+        }
 
     def summary(self) -> str:
         return (

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 import dspy
 
@@ -121,7 +122,15 @@ class AgentGenerator:
 
     # -- module generation: RLM + ReAct + CodeAct + CoT --
 
-    def generate_module(self, entry: AgentEntry) -> dspy.Module:
+    def _validate_module(self, module: dspy.Module) -> bool:
+        """Quick smoke-test a generated module. Returns False if broken."""
+        try:
+            module(task="test query")
+            return True
+        except Exception:
+            return False
+
+    def generate_module(self, entry: AgentEntry) -> dspy.Module | None:
         if entry.name in self._module_cache:
             return self._module_cache[entry.name]
 
@@ -129,7 +138,6 @@ class AgentGenerator:
         tools = _build_tools(entry.tools, self._bridge)
 
         if entry.use_code and tools:
-            # RLM: REPL-based agent with code execution, MCP tools, and sub-LLM queries
             module = dspy.RLM(
                 "task: str -> result: str",
                 tools=tools,
@@ -137,23 +145,24 @@ class AgentGenerator:
                 max_llm_calls=16,
             )
         elif tools:
-            # ReAct: agentic loop with tools (thought + action + observation)
             module = dspy.ReAct(
                 "task: str -> result: str",
                 tools=tools,
                 max_iters=10,
             )
         elif entry.use_code:
-            # CodeAct: tool-use via code actions (code-capable, no external tools)
             module = dspy.CodeAct("task: str -> result: str")
         else:
-            # Plain ChainOfThought for simple reasoning agents
             sig_cls = type(
                 entry.name,
                 (dspy.Signature,),
                 {"__doc__": prompt, "task": dspy.InputField(), "result": dspy.OutputField()},
             )
             module = dspy.ChainOfThought(sig_cls)
+
+        if not self._validate_module(module):
+            logger.error("Generated module for '%s' failed validation", entry.name)
+            return None
 
         self._module_cache[entry.name] = module
         return module

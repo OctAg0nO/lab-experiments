@@ -16,7 +16,7 @@ from ..shared.config import get_lm_model, get_student_lm_model, get_lm_temperatu
 from .mcp.client import MCPClient
 from .mcp.bridge import MCPBridge
 from .meta.agent_generator import AgentGenerator
-from .meta.meta_agent import MetaAgent
+from .meta.meta_agent import MetaAgent, ResourceBudget
 from .evolution.gfl import GFLPipeline
 
 
@@ -50,6 +50,7 @@ def _make_meta(ctx, bridge=None) -> MetaAgent:
         generator=generator,
         tool_defs=tool_defs,
         skills_dir=str(BASE_DIR / "memory" / "skills"),
+        budget=ctx.obj["BUDGET"],
     )
 
 
@@ -58,12 +59,20 @@ def _make_meta(ctx, bridge=None) -> MetaAgent:
 @click.group()
 @click.option("--query", "-q", default="", help="Task for the meta-agent")
 @click.option("--iterations", "-i", default=5, show_default=True, help="Max iterations")
+@click.option("--max-llm", default=100, show_default=True, help="Max LLM calls budget")
+@click.option("--max-time", default=300, show_default=True, help="Max wall seconds budget")
+@click.option("--max-agents", default=10, show_default=True, help="Max generated agents budget")
 @click.pass_context
-def cli(ctx: click.Context, query: str, iterations: int):
+def cli(ctx: click.Context, query: str, iterations: int, max_llm: int, max_time: int, max_agents: int):
     """Meta-Agent — generates specialized agents on the fly using LSE + Trace2Skill."""
     ctx.ensure_object(dict)
     ctx.obj["QUERY"] = query
     ctx.obj["ITERATIONS"] = iterations
+    ctx.obj["BUDGET"] = ResourceBudget(
+        max_llm_calls=max_llm,
+        max_wall_seconds=max_time,
+        max_agents_generated=max_agents,
+    )
     ctx.obj["DIRECT_LM"] = dspy.LM(get_lm_model(), temperature=get_lm_temperature())
 
 
@@ -155,6 +164,9 @@ def optimize(ctx: click.Context):
 
     for entry in meta.stack:
         module = meta._generator.generate_module(entry)
+        if module is None:
+            console.print(f"  [yellow]Skipping {entry.name}: module validation failed[/]")
+            continue
         trainset = [
             dspy.Example(task=query, result="quality output").with_inputs("task"),
         ]
@@ -233,6 +245,9 @@ def distill(ctx: click.Context):
     meta.generate_agents("distillation")
     for entry in meta.stack:
         module = meta._generator.generate_module(entry)
+        if module is None:
+            console.print(f"  [yellow]Skipping {entry.name}: module validation failed[/]")
+            continue
         bs = dspy.BootstrapFewShot(
             metric=lambda ex, pred, trace: True,
             max_bootstrapped_demos=4,

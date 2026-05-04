@@ -73,6 +73,9 @@ uv run python -m lab.11_meta_agent [OPTIONS] COMMAND [ARGS]...
 Options:
   -q, --query TEXT          Task description
   -i, --iterations INTEGER  Max iterations  [default: 5]
+  --max-llm INTEGER         Max LLM calls budget  [default: 100]
+  --max-time INTEGER        Max wall seconds budget  [default: 300]
+  --max-agents INTEGER      Max generated agents budget  [default: 10]
   --help                    Show this message and exit.
 
 Commands:
@@ -119,6 +122,29 @@ The pipeline in `evolution/gfl.py` runs all optimizers and compares results:
 
 References: [GFL blog post](https://octagono.org/blog/dspy-generative-feedback-loops/),
 [lab 07](../../07-generative-feedback-loops/)
+
+## Resource Budget
+
+Three budget controls via `--max-llm`, `--max-time`, and `--max-agents` enforce
+resource limits across the entire meta-agent pipeline. A `ResourceBudget` dataclass
+tracks LLM calls, wall time, and agent count, raising `RuntimeError` if any limit
+is exceeded. The budget is checked before each LLM call and each agent generation.
+
+## Signature Validation
+
+Each generated module is smoke-tested with a dummy input via `_validate_module()`.
+If the module raises an exception during the test, it is rejected and the agent's
+`failure_count` is incremented. Agents with high failure rates are deprioritized
+by the MultiChainComparison selector.
+
+## Self-Evaluation
+
+After a `run` pipeline, `MetaAgent.evaluate_self()` returns:
+- `avg_quality`: mean LSE quality score across iterations
+- `net_improvement`: quality delta from first to last iteration
+- `agents_generated`: count of agents created
+- `budget_used`: actual LLM calls and wall time consumed
+- `agent_stats`: per-agent success rate, average quality, failure count
 
 ## Key Differences from lab 10
 

@@ -19,6 +19,7 @@ class AgentEntry:
     created_at: str = ""
     run_count: int = 0
     avg_quality: float = 0.0
+    failure_count: int = 0
 
     def __post_init__(self):
         if not self.created_at:
@@ -86,6 +87,12 @@ class AgentStack:
         entry.run_count += 1
         entry.avg_quality = total / entry.run_count
 
+    def record_failure(self, name: str) -> None:
+        entry = self._by_name.get(name)
+        if entry is None:
+            return
+        entry.failure_count += 1
+
     def summary(self) -> str:
         if not self._entries:
             return "empty stack"
@@ -93,6 +100,7 @@ class AgentStack:
         for e in self._entries:
             parts.append(
                 f"  {e.name}: {e.role} | runs={e.run_count} "
-                f"| avg_q={e.avg_quality:.2f} | tools={len(e.tools)}"
+                f"| avg_q={e.avg_quality:.2f} | fails={e.failure_count} "
+                f"| tools={len(e.tools)}"
             )
         return "\n".join(parts)
