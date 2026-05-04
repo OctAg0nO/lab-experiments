@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "crawl4ai": {
+      "description": "Deep web scraping and content extraction",
+      "enabled": true,
+      "type": "sse",
+      "url": "http://localhost:11235/mcp/sse"
+    },
+    "fetch": {
+      "description": "Quick URL fetching and markdown extraction",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "openrouter": {
+      "description": "Access 100+ models via OpenRouter",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@physics91/openrouter-mcp", "start"]
+    }
+  }
+}
