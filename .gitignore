@@ -15,3 +15,6 @@ wheels/
 
 # OpenCode agent configuration
 .opencode/
+
+# Cloned third-party MCP servers (vendored in-tree)
+lab/12_formal_evolution/z3_mcp/

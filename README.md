@@ -20,16 +20,18 @@ flowchart LR
         A1["07-gfl<br/>Generative Feedback Loops"]
         A2["08-rlm-mcp<br/>RLM + MCP + BAMLAdapter"]
     end
-    subgraph Platform["Research Platforms"]
+    subgraph Evolution["Self-Evolving Agents"]
         direction TB
         P1["09_super_deep_research<br/>Multi-agent + LSE + KG"]
         P2["10_dapr_deep_research<br/>DurableAgent + DSPy deltas"]
+        P3["11_meta_agent<br/>Dynamic agent generation"]
+        P4["12_formal_evolution<br/>Z3 + Lean4 + OpenRouter MCP"]
     end
     subgraph Util["Utilities"]
         S1["99-sandbox<br/>Scratch space"]
         S2["shared<br/>Env & config helpers"]
     end
-    Core --> Advanced --> Platform
+    Core --> Advanced --> Evolution
 ```
 
 ## Quick Start
@@ -43,7 +45,7 @@ cp .env.example .env   # fill in DEEPSEEK_API_KEY and configure models
 
 ## Documentation
 
-Complete API reference for every module is in [`docs/`](docs/INDEX.md) — signatures, classes, functions, DSPy modules, and usage patterns for all 12 sub-projects.
+Complete API reference for every module is in [`docs/`](docs/INDEX.md) — signatures, classes, functions, DSPy modules, and usage patterns for all 13 sub-projects.
 
 ## Running
 
@@ -62,4 +64,7 @@ python -m lab.09_super_deep_research.cli --chat
 
 # Dapr-backed distributed research (requires dapr init)
 dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
+
+# Formal evolution: Z3 + Lean4 + OpenRouter MCP consensus
+uv run python -m lab.12_formal_evolution --query "Verify sorting algorithm correctness" run
 ```

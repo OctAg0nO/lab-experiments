@@ -1,0 +1,59 @@
+{
+  "mcpServers": {
+    "crawl4ai": {
+      "description": "Deep web scraping and content extraction",
+      "enabled": true,
+      "type": "sse",
+      "url": "http://localhost:11235/mcp/sse"
+    },
+    "fetch": {
+      "description": "Quick URL fetching and markdown extraction",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "openrouter": {
+      "description": "Access 100+ models via OpenRouter for multi-model consensus",
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@physics91/openrouter-mcp", "start"]
+    },
+    "z3-solver": {
+      "description": "Z3 theorem prover for constraint solving and program verification",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--directory", "lab/12_formal_evolution/z3_mcp", "python", "-m", "z3_mcp.server.main"]
+    },
+    "lean-lsp": {
+      "description": "Lean theorem prover for formal proof verification",
+      "enabled": false,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["lean-lsp-mcp"]
+    },
+    "arxiv": {
+      "description": "Search, download, and read arXiv research papers",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["arxiv-mcp-server"]
+    },
+    "filesystem": {
+      "description": "Read, write, search, and manage local files and directories",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "git": {
+      "description": "Interact with Git repositories — status, diff, log, commit, branches",
+      "enabled": false,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "."]
+    }
+  }
+}

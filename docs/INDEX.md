@@ -17,6 +17,7 @@ lab/
 ├── 09_super_deep_research/  Multi-agent research: UCB frontier + LSE evolution + KG memory
 ├── 10_dapr_deep_research/   Durable multi-agent: Dapr workflows + DSPy deltas + distillation
 ├── 11_meta_agent/           Meta-agent: dynamic agent generation via LSE + Trace2Skill
+├── 12_formal_evolution/    Formal evolution: Z3 + Lean4 + OpenRouter MCP consensus
 ├── 99-sandbox/         Scratch space
 └── shared/             Env config, LM helpers, research primitives (ResearchDirection, ResearchFrontier ABC)
 ```
@@ -36,6 +37,7 @@ lab/
 | [09-super-deep-research](./09-super-deep-research.md) | 16 files in 5 packages | `ResearchOrchestrator`, `ResearchFrontier`, `ResearchDirection`, `KnowledgeGraph`, `MemoryStore`, `MCPClient`, `LSEOptimizer`, `SkillConsolidator`, `SelfDistill`, 5 agent factories | `RLM`, `ChainOfThought` |
 | [10-dapr-deep-research](./10-dapr-deep-research.md) | 15 files in 6 packages + shared | `ExplorerAgent`, `DeepReaderAgent`, `SynthesizerAgent`, `CriticAgent`, `ResearchWorkflow`, `InMemoryFrontier`, `DaprFrontier`, `ResearchFrontier` ABC, `ResearchDirection`, `NoopStore`, `LSEOptimizer`, `SkillConsolidator`, `MCPBridge`, `AssessBatchSaturation`, 10 DSPy signatures, shared compile constants | `RLM`, `ChainOfThought`, `BestOfN`, `Refine`, `MultiChainComparison`, `BootstrapFewShot`, `Evaluate`, `BAMLAdapter` |
 | [11-meta-agent](./11-meta-agent.md) | 10 files in 5 packages | `MetaAgent`, `AgentStack`, `AgentEntry`, `AgentGenerator`, `AnalyzeTask`, `GenerateSignature`, `SelectNextAgent`, `InMemoryFrontier`, `LSEOptimizer`, `SkillConsolidator`, `MCPBridge` | `ChainOfThought`, `BootstrapFewShot` |
+| [12-formal-evolution](./12-formal-evolution.md) | 10 files + config | MCP servers: z3-solver, lean-lsp, openrouter; agents auto-discover Z3/Lean4/OpenRouter tools | Same as lab 11 + tool integration |
 | [shared](./shared.md) | `config.py`, `research.py` | `get_lm_model()`, `get_student_lm_model()`, `get_lm_temperature()`, `get_agent_port()`, `get_dapr_state_store()`, `get_dapr_pubsub()`, `project_root()`, `ResearchDirection` dataclass, `ResearchFrontier` ABC, `SATURATION_THRESHOLD`, `MAX_BOOTSTRAPPED_DEMOS`, `MAX_LABELED_DEMOS` | — |
 
 ## Setup
