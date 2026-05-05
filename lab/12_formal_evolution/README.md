@@ -171,6 +171,48 @@ uv run python -m lab.12_formal_evolution \
 
 Track agent improvement over time using MLflow observability.
 
+The formal verifier (Z3/Lean4) acts as a **semantic firewall** between teacher
+and student — only logically proven outputs pass through to the training set,
+preventing synthetic data collapse.
+
+```mermaid
+flowchart LR
+    subgraph Teacher["Teacher (OpenRouter)"]
+        T[Multi-Model Consensus]
+    end
+    subgraph Firewall["Semantic Firewall"]
+        Z3[Z3 SMT Solver]
+        L4[Lean4 Theorem Prover]
+    end
+    subgraph Student["Student (Gemma 4)"]
+        S[BootstrapFewShot Distillation]
+    end
+    subgraph Log["Observability (MLflow)"]
+        M1[log_gold_standard]
+        M2[log_student_run]
+        M3[compare_scores]
+    end
+
+    T -->|generated code + spec| Z3
+    T -->|formal proof| L4
+    Z3 -->|UNSAT ✓ verified| S
+    L4 -->|no goals ✓ proven| S
+    Z3 -->|SAT ✗ counter-example| T
+    L4 -->|goals remain ✗| T
+    S -->|student output| M2
+    T -.->|teacher trace| M1
+    M2 --> M3
+    M3 -->|accuracy < 0.85| T
+    M3 -->|accuracy ≥ 0.85| D[Done ✓]
+
+    style Z3 fill:#4a9eff88
+    style L4 fill:#4a9eff88
+    style Firewall fill:#ff6b6b33,stroke:#ff6b6b
+    style Teacher fill:#51cf6688
+    style Student fill:#ffd43b88
+    style Log fill:#9775fa88
+```
+
 ```
 User query: "Distill a verified optimization algorithm to a student model and track accuracy"
     → Phase 1 (Teacher): OpenRouter consensus drafts the algorithm
@@ -348,6 +390,16 @@ how the agent instructs itself to use the available tools.
 
 ## Prerequisites
 
+| Server | Repository | Install |
+|--------|-----------|---------|
+| **Z3-solver** | [github.com/javergar/z3_mcp](https://github.com/javergar/z3_mcp) | Cloned in-tree at `lab/12_formal_evolution/z3_mcp/` |
+| **Lean LSP** | [github.com/oOo0oOo/lean-lsp-mcp](https://github.com/oOo0oOo/lean-lsp-mcp) | `uvx lean-lsp-mcp` |
+| **OpenRouter** | [github.com/physics91/openrouter-mcp](https://github.com/physics91/openrouter-mcp) | `npx @physics91/openrouter-mcp init` |
+| **arXiv** | [github.com/blazickjp/arxiv-mcp-server](https://github.com/blazickjp/arxiv-mcp-server) | `uvx arxiv-mcp-server` |
+| **Filesystem** | [github.com/modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) | `npx -y @modelcontextprotocol/server-filesystem` |
+| **Git** | [github.com/modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers/tree/main/src/git) | `uvx mcp-server-git` |
+| **MLflow** | [mlflow.org/docs/latest/genai/mcp](https://mlflow.org/docs/latest/genai/mcp/) | `pip install 'mlflow[mcp]>=3.5.1'` |
+
 ```bash
 # Z3 MCP — already cloned to lab/12_formal_evolution/z3_mcp/
 uv sync --directory lab/12_formal_evolution/z3_mcp
@@ -359,8 +411,6 @@ uvx lean-lsp-mcp
 npx @physics91/openrouter-mcp init
 
 # arXiv — works out of the box via uvx
-# Filesystem — requires npx (Node.js)
-# Git — works out of the box via uvx
 # MLflow trace management (optional, requires MLflow tracking server)
 pip install 'mlflow[mcp]>=3.5.1'
 
