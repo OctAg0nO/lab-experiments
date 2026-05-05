@@ -130,31 +130,53 @@ uv run python -m lab.12_formal_evolution \
 
 Parallel research + formal verification + code generation across 5 MCP servers.
 
-```
-User query: "Audit a distributed key-value store for data integrity under partition"
-    ┌─ Parallel Phase 1 (discovery) ─────────────────────────────┐
-    │  arXiv MCP:       search "distributed consensus + partition tolerance" │
-    │  crawl4ai:         scrape latest blog posts on Raft/Paxos            │
-    │  fetch:            grab SPEC benchmarks for KV stores                │
-    └──────────────────────────────┬──────────────────────────────────────┘
-                                   ↓
-    ┌─ Parallel Phase 2 (analysis) ─────────────────────────────┐
-    │  OpenRouter (Claude):  formal spec of the quorum logic     │
-    │  OpenRouter (GPT-4o):  identify edge cases in replication │
-    │  OpenRouter (Llama):   draft invariants for data integrity │
-    └──────────────────────────────┬──────────────────────────────────────┘
-                                   ↓
-    ┌─ Sequential Phase 3 (verify) ────────────────────────────┐
-    │  Z3: model quorum intersection → prove no split-brain     │
-    │  Z3: verify read-after-write consistency invariants       │
-    │  if Z3 SAT → feed counter-example back → re-generate      │
-    └──────────────────────────────┬──────────────────────────────────────┘
-                                   ↓
-    ┌─ Phase 4 (produce) ──────────────────────────────────────┐
-    │  GFL pipeline: optimize the audit agent with new invariants│
-    │  filesystem MCP: write audit report to disk                │
-    │  git MCP: commit report to repo                            │
-    └────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    Q[User query: Audit distributed KV store<br/>for data integrity under partition] --> P1
+
+    subgraph P1[Phase 1 — Parallel Discovery]
+        direction LR
+        A1[arXiv MCP<br/>search papers on<br/>consensus + partition] 
+        A2[crawl4ai<br/>scrape blog posts<br/>on Raft / Paxos]
+        A3[fetch<br/>grab SPEC benchmarks<br/>for KV stores]
+    end
+
+    P1 --> P2
+
+    subgraph P2[Phase 2 — Parallel Analysis]
+        direction LR
+        B1[OpenRouter Claude<br/>formal spec of<br/>quorum logic]
+        B2[OpenRouter GPT-4o<br/>identify edge cases<br/>in replication]
+        B3[OpenRouter Llama<br/>draft invariants for<br/>data integrity]
+    end
+
+    P2 --> P3
+
+    subgraph P3[Phase 3 — Sequential Verification]
+        direction TB
+        C1[Z3: model quorum intersection<br/>→ prove no split-brain]
+        C2[Z3: verify read-after-write<br/>consistency invariants]
+        C3{Counter-example?}
+        C1 --> C2 --> C3
+        C3 -->|SAT ✗| F[Feed counter-example<br/>back → re-generate] --> C1
+    end
+
+    P3 --> P4
+
+    subgraph P4[Phase 4 — Production]
+        direction LR
+        D1[GFL pipeline<br/>optimize audit agent<br/>with new invariants]
+        D2[filesystem MCP<br/>write audit report<br/>to disk]
+        D3[git MCP<br/>commit report<br/>to repo]
+    end
+
+    style Q fill:#2d2d5e,stroke:#4a9eff
+    style P1 fill:#1a3a5c,stroke:#4a9eff
+    style P2 fill:#1a3a5c,stroke:#4a9eff
+    style P3 fill:#3a1a5c,stroke:#9775fa
+    style P4 fill:#1a5c3a,stroke:#51cf66
+    style C3 fill:#5c2a2a,stroke:#ff6b6b
+    style F fill:#5c2a2a,stroke:#ff6b6b
 ```
 
 **What the agent does**: two parallel discovery phases (3 servers concurrently),
