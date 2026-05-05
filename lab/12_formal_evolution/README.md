@@ -132,51 +132,51 @@ Parallel research + formal verification + code generation across 5 MCP servers.
 
 ```mermaid
 flowchart TB
-    Q[User query: Audit distributed KV store<br/>for data integrity under partition] --> P1
+    Q[Audit distributed KV store] --> P1
 
     subgraph P1[Phase 1 — Parallel Discovery]
         direction LR
-        A1[arXiv MCP<br/>search papers on<br/>consensus + partition] 
-        A2[crawl4ai<br/>scrape blog posts<br/>on Raft / Paxos]
-        A3[fetch<br/>grab SPEC benchmarks<br/>for KV stores]
+        A1[arXiv: search papers] 
+        A2[crawl4ai: scrape blogs]
+        A3[fetch: SPEC benchmarks]
     end
 
     P1 --> P2
 
     subgraph P2[Phase 2 — Parallel Analysis]
         direction LR
-        B1[OpenRouter Claude<br/>formal spec of<br/>quorum logic]
-        B2[OpenRouter GPT-4o<br/>identify edge cases<br/>in replication]
-        B3[OpenRouter Llama<br/>draft invariants for<br/>data integrity]
+        B1[Claude: formal spec]
+        B2[GPT-4o: edge cases]
+        B3[Llama: invariants]
     end
 
     P2 --> P3
 
     subgraph P3[Phase 3 — Sequential Verification]
-        direction TB
-        C1[Z3: model quorum intersection<br/>→ prove no split-brain]
-        C2[Z3: verify read-after-write<br/>consistency invariants]
+        C1[Z3: model quorum → prove no split-brain]
+        C2[Z3: verify read-after-write consistency]
         C3{Counter-example?}
         C1 --> C2 --> C3
-        C3 -->|SAT ✗| F[Feed counter-example<br/>back → re-generate] --> C1
+        C3 -->|SAT| F[Re-generate from counter-example] --> C1
     end
 
     P3 --> P4
 
     subgraph P4[Phase 4 — Production]
         direction LR
-        D1[GFL pipeline<br/>optimize audit agent<br/>with new invariants]
-        D2[filesystem MCP<br/>write audit report<br/>to disk]
-        D3[git MCP<br/>commit report<br/>to repo]
+        D1[GFL: optimize with invariants]
+        D2[filesystem: write report]
+        D3[git: commit to repo]
     end
 
-    style Q fill:#2d2d5e,stroke:#4a9eff
-    style P1 fill:#1a3a5c,stroke:#4a9eff
-    style P2 fill:#1a3a5c,stroke:#4a9eff
-    style P3 fill:#3a1a5c,stroke:#9775fa
-    style P4 fill:#1a5c3a,stroke:#51cf66
-    style C3 fill:#5c2a2a,stroke:#ff6b6b
-    style F fill:#5c2a2a,stroke:#ff6b6b
+    %% Styles
+    style Q fill:#1e1e4a,stroke:#4a9eff,color:#fff
+    style P1 fill:#0d2b45,stroke:#4a9eff
+    style P2 fill:#0d2b45,stroke:#4a9eff
+    style P3 fill:#2a0d45,stroke:#9775fa
+    style P4 fill:#0d452b,stroke:#51cf66
+    style C3 fill:#4a1a1a,stroke:#ff6b6b,color:#fff
+    style F fill:#4a1a1a,stroke:#ff6b6b,color:#fff
 ```
 
 **What the agent does**: two parallel discovery phases (3 servers concurrently),
@@ -202,37 +202,44 @@ flowchart LR
     subgraph Teacher["Teacher (OpenRouter)"]
         T[Multi-Model Consensus]
     end
+
     subgraph Firewall["Semantic Firewall"]
         Z3[Z3 SMT Solver]
         L4[Lean4 Theorem Prover]
     end
+
     subgraph Student["Student (Gemma 4)"]
         S[BootstrapFewShot Distillation]
     end
+
     subgraph Log["Observability (MLflow)"]
-        M1[log_gold_standard]
-        M2[log_student_run]
-        M3[compare_scores]
+        M1[log gold standard]
+        M2[log student run]
+        M3[compare scores]
     end
 
-    T -->|generated code + spec| Z3
+    T -->|code + spec| Z3
     T -->|formal proof| L4
-    Z3 -->|UNSAT ✓ verified| S
-    L4 -->|no goals ✓ proven| S
-    Z3 -->|SAT ✗ counter-example| T
-    L4 -->|goals remain ✗| T
+    Z3 -->|UNSAT verified| S
+    L4 -->|proven| S
+    Z3 -->|SAT counter-example| T
+    L4 -->|goals remain| T
     S -->|student output| M2
     T -.->|teacher trace| M1
     M2 --> M3
     M3 -->|accuracy < 0.85| T
-    M3 -->|accuracy ≥ 0.85| D[Done ✓]
+    M3 -->|accuracy >= 0.85| D[Done]
 
-    style Z3 fill:#4a9eff88
-    style L4 fill:#4a9eff88
-    style Firewall fill:#ff6b6b33,stroke:#ff6b6b
-    style Teacher fill:#51cf6688
-    style Student fill:#ffd43b88
-    style Log fill:#9775fa88
+    %% Styles
+    style T fill:#1b5e20,color:#fff
+    style Z3 fill:#0d47a1,color:#fff
+    style L4 fill:#0d47a1,color:#fff
+    style S fill:#e65100,color:#fff
+    style Firewall fill:#b71c1c,stroke:#b71c1c
+    style M1 fill:#4a148c,color:#fff
+    style M2 fill:#4a148c,color:#fff
+    style M3 fill:#4a148c,color:#fff
+    style D fill:#1b5e20,color:#fff
 ```
 
 ```
@@ -259,18 +266,19 @@ uv run python -m lab.12_formal_evolution \
 
 ```mermaid
 flowchart LR
-    A[arxiv<br/>discovery] --> B[crawl4ai<br/>deep read]
-    B --> C[openrouter<br/>consensus]
-    C --> D[z3-solver<br/>verify]
-    D --> E[gfl<br/>optimize]
-    E --> F[distill<br/>compress]
+    A[arxiv: discovery] --> B[crawl4ai: deep read]
+    B --> C[openrouter: consensus]
+    C --> D[z3-solver: verify]
+    D --> E[gfl: optimize]
+    E --> F[distill: compress]
 
-    style A fill:#1a3a5c,stroke:#4a9eff
-    style B fill:#1a3a5c,stroke:#4a9eff
-    style C fill:#3a1a5c,stroke:#9775fa
-    style D fill:#5c2a2a,stroke:#ff6b6b
-    style E fill:#1a5c3a,stroke:#51cf66
-    style F fill:#5c4a1a,stroke:#ffd43b
+    %% Styles
+    style A fill:#0d2b45,stroke:#4a9eff,color:#fff
+    style B fill:#0d2b45,stroke:#4a9eff,color:#fff
+    style C fill:#2a0d45,stroke:#9775fa,color:#fff
+    style D fill:#4a1a1a,stroke:#ff6b6b,color:#fff
+    style E fill:#0d452b,stroke:#51cf66,color:#fff
+    style F fill:#4a3a00,stroke:#ffd43b,color:#fff
 ```
 
 All connected. All zero-code. The agent routes automatically.
@@ -371,12 +379,13 @@ falls back to the next best tool automatically — no code handles this, the
 
 ```mermaid
 flowchart TB
-    Z3[Z3 SAT solving] -->|if disabled| OR[OpenRouter consensus<br/>multi-model logical analysis]
-    OR -->|if disabled| COT[ChainOfThought<br/>internal reasoning]
+    Z3[Z3 SAT solving] -->|if disabled| OR[OpenRouter consensus]
+    OR -->|if disabled| COT[ChainOfThought reasoning]
 
-    style Z3 fill:#2d5e2d,stroke:#51cf66
-    style OR fill:#3a3a6e,stroke:#9775fa
-    style COT fill:#5e5e5e,stroke:#adb5bd
+    %% Styles
+    style Z3 fill:#1b5e20,stroke:#51cf66,color:#fff
+    style OR fill:#1a237e,stroke:#9775fa,color:#fff
+    style COT fill:#424242,stroke:#9e9e9e,color:#fff
 ```
 
 ```bash
