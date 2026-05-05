@@ -257,9 +257,20 @@ uv run python -m lab.12_formal_evolution \
 
 ### 6. Full R&D Lifecycle (combined)
 
-```
-arxiv (discovery) → crawl4ai (deep read) → openrouter (consensus) →
-z3-solver (verify) → gfl (optimize) → distill (compress)
+```mermaid
+flowchart LR
+    A[arxiv<br/>discovery] --> B[crawl4ai<br/>deep read]
+    B --> C[openrouter<br/>consensus]
+    C --> D[z3-solver<br/>verify]
+    D --> E[gfl<br/>optimize]
+    E --> F[distill<br/>compress]
+
+    style A fill:#1a3a5c,stroke:#4a9eff
+    style B fill:#1a3a5c,stroke:#4a9eff
+    style C fill:#3a1a5c,stroke:#9775fa
+    style D fill:#5c2a2a,stroke:#ff6b6b
+    style E fill:#1a5c3a,stroke:#51cf66
+    style F fill:#5c4a1a,stroke:#ffd43b
 ```
 
 All connected. All zero-code. The agent routes automatically.
@@ -358,12 +369,14 @@ When a preferred tool is unavailable (server disabled or not installed), the age
 falls back to the next best tool automatically — no code handles this, the
 `BestOfN` analysis simply omits unavailable tools.
 
-```
-Preferred path:  Z3 (SAT solving)
-  ↓ if disabled
-Fallback:        OpenRouter consensus (multi-model logical analysis)
-  ↓ if disabled
-Fallback:        ChainOfThought internal reasoning (no external tool)
+```mermaid
+flowchart TB
+    Z3[Z3 SAT solving] -->|if disabled| OR[OpenRouter consensus<br/>multi-model logical analysis]
+    OR -->|if disabled| COT[ChainOfThought<br/>internal reasoning]
+
+    style Z3 fill:#2d5e2d,stroke:#51cf66
+    style OR fill:#3a3a6e,stroke:#9775fa
+    style COT fill:#5e5e5e,stroke:#adb5bd
 ```
 
 ```bash
