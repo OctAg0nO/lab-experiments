@@ -1,8 +1,9 @@
 # 12 — Formal Evolution: Verified Multi-Model Consensus
 
-**Extension of lab 11** adding 6 MCP servers for formal verification (Z3, Lean4),
-multi-model consensus (OpenRouter), research (arXiv), filesystem access, and
-Git operations — all auto-discovered by the meta-agent via the MCP bridge.
+**Extension of lab 11** adding 7 MCP servers for formal verification (Z3, Lean4),
+multi-model consensus (OpenRouter), research (arXiv), observability (MLflow),
+filesystem access, and Git operations — all auto-discovered by the meta-agent
+via the MCP bridge.
 
 Zero code changes. Add any MCP server to `config/mcp_servers.json` and the agent
 finds its tools automatically.
@@ -19,6 +20,7 @@ finds its tools automatically.
 | `lean-lsp` | stdio | ❌ | `lean_goal`, `lean_build`, `lean_diagnostic_messages`, `lean_run_code`, `lean_leansearch`, 20+ more | Theorem proving |
 | `filesystem` | stdio | ❌ | `read_file`, `write_file`, `edit_file`, `search_files`, `directory_tree`, `list_directory` | Local file access |
 | `git` | stdio | ❌ | `git_status`, `git_diff`, `git_log`, `git_commit`, `git_branch`, `git_checkout` | Git operations |
+| `mlflow` | stdio | ❌ | `search_traces`, `get_trace`, `log_feedback`, `log_expectation`, `set_trace_tag`, `delete_traces` | LLM trace observability & evaluation |
 
 Toggle any server via `"enabled": false` — disabled servers are skipped at startup.
 
@@ -33,7 +35,7 @@ Toggle any server via `"enabled": false` — disabled servers are skipped at sta
 ├── mcp/                      # MCPClient + MCPBridge (from lab 11)
 ├── z3_mcp/                   # Cloned Z3 MCP server (javergar/z3_mcp)
 └── config/
-    └── mcp_servers.json      # All 8 MCP servers configured
+    └── mcp_servers.json      # All 9 MCP servers configured
 ```
 
 ## How It Works
@@ -165,7 +167,31 @@ uv run python -m lab.12_formal_evolution \
   --iterations 25 run
 ```
 
-### 5. Full R&D Lifecycle (combined)
+### 5. Self-Evaluating Distillation Loop
+
+Track agent improvement over time using MLflow observability.
+
+```
+User query: "Distill a verified optimization algorithm to a student model and track accuracy"
+    → Phase 1 (Teacher): OpenRouter consensus drafts the algorithm
+    → Phase 2 (Verify): Z3 proves correctness → counter-examples loop until UNSAT
+    → Phase 3 (Log): MLflow MCP logs the verified trace as a "gold standard" run
+    → Phase 4 (Distill): BootstrapFewShot compresses to student model (Gemma 4)
+    → Phase 5 (Compare): MLflow logs student run, agent compares scores
+    → Phase 6 (Escalate): If student accuracy < 0.85 teacher, trigger GFL re-optimization
+```
+
+**What the agent does**: closes the observability loop — it tracks its own distillation
+accuracy over time, uses MLflow as a "Verified Code Vault" cataloging every provably
+correct algorithm, and auto-escalates when student quality degrades.
+
+```bash
+uv run python -m lab.12_formal_evolution \
+  --query "Distill the verified quorum-safe replication algorithm to a student model, log teacher and student traces to MLflow, and re-optimize if student accuracy drops below 0.85" \
+  --iterations 20 run
+```
+
+### 6. Full R&D Lifecycle (combined)
 
 ```
 arxiv (discovery) → crawl4ai (deep read) → openrouter (consensus) →
@@ -179,6 +205,146 @@ uv run python -m lab.12_formal_evolution \
   --query "Research the latest advances in vector optimization, build a consensus-backed implementation, verify it with Z3, and distill to a student model" \
   --iterations 20 run
 ```
+
+## Optimization Patterns (Zero Code)
+
+The system adapts purely through config and instructions — no Python changes needed.
+These patterns let you shape agent behavior without touching code.
+
+### 1. Config Profiles — Domain-Specific Server Presets
+
+Create multiple config files for different modes. The agent's tool discovery
+changes entirely based on which servers are enabled.
+
+```bash
+# Research profile — discovery + consensus only
+cp config/mcp_servers.json config/mcp_servers.full.json
+# Create config/mcp_servers.research.json:
+#   enable: crawl4ai, fetch, arxiv, openrouter
+#   disable: z3-solver, lean-lsp, filesystem, git, mlflow
+
+# Security profile — verification + isolation
+#   enable: z3-solver, openrouter, filesystem
+#   disable: crawl4ai, fetch, arxiv, lean-lsp, git, mlflow
+
+# Distillation profile — cheap student training
+#   enable: openrouter, mlflow
+#   disable: crawl4ai, fetch, arxiv, z3-solver, lean-lsp
+```
+
+Swap configs by pointing the agent at a different file. The CLI picks up the
+change on next run:
+
+```bash
+# Full research → no external network (air-gapped verification)
+uv run python -m lab.12_formal_evolution \
+  --query "Verify all generated invariants with Z3, no web search needed" \
+  --iterations 8 run
+```
+
+### 2. Tool Budget Steering via CLI Flags
+
+The agent respects strict resource budgets that shape its tool-use strategy:
+
+| Flag | Effect on Tool Selection |
+|------|-------------------------|
+| `--iterations 3` | Shallow explore — one or two tools max, fast consensus |
+| `--iterations 20` | Deep chain — multiple MCP servers in sequence |
+| `--max-llm 30` | Conservative — agent avoids expensive consensus rounds |
+| `--max-llm 200` | Aggressive — full OpenRouter multi-model + Z3 feedback loops |
+| `--max-agents 3` | Focused — 3 specialized agents, each using different tools |
+| `--max-agents 15` | Exploratory — many agents try different tool combinations |
+
+```bash
+# Fast: cheap single-agent, one MCP tool
+uv run python -m lab.12_formal_evolution -q "Quick Z3 bounds check" -i 3 --max-llm 20 run
+
+# Deep: multi-agent, multi-MCP with verification loops
+uv run python -m lab.12_formal_evolution -q "Full pipeline" -i 20 --max-llm 200 --max-agents 10 run
+```
+
+### 3. Query Engineering — Tool Selection via Task Description
+
+The agent's `BestOfN` task analysis maps query keywords to tool requirements.
+You guide tool selection through natural language in the query:
+
+| Query Keyword Pattern | Tools the Agent Activates |
+|----------------------|--------------------------|
+| `"search"` + `"paper"` + `"ArXiv"` | arXiv MCP (`search_papers`, `download_paper`, `read_paper`) |
+| `"verify"` + `"prove"` + `"Z3"` | Z3-solver (`solve_constraint_problem`, `simple_constraint_solver`) |
+| `"consensus"` + `"cross-validate"` | OpenRouter (`chat_completion` with model list) |
+| `"write to disk"` + `"save report"` | Filesystem MCP (`write_file`) |
+| `"git"` + `"commit"` + `"branch"` | Git MCP (`git_status`, `git_commit`, `git_log`) |
+| `"log"` + `"track"` + `"MLflow"` | MLflow MCP (`search_traces`, `log_feedback`) |
+| `"theorem"` + `"proof"` + `"Lean4"` | Lean-LSP MCP (`lean_goal`, `lean_build`, `lean_run_code`) |
+
+```bash
+# Agent will use Z3 but skip arXiv/Lean4
+uv run python -m lab.12_formal_evolution \
+  -q "Z3 verify this sorting function's postcondition" run
+
+# Agent will use arXiv + OpenRouter consensus but skip verification
+uv run python -m lab.12_formal_evolution \
+  -q "Search ArXiv for multi-agent consensus papers and cross-validate findings with 3 models" run
+```
+
+### 4. Escalation Chains — Graceful Degradation
+
+When a preferred tool is unavailable (server disabled or not installed), the agent
+falls back to the next best tool automatically — no code handles this, the
+`BestOfN` analysis simply omits unavailable tools.
+
+```
+Preferred path:  Z3 (SAT solving)
+  ↓ if disabled
+Fallback:        OpenRouter consensus (multi-model logical analysis)
+  ↓ if disabled
+Fallback:        ChainOfThought internal reasoning (no external tool)
+```
+
+```bash
+# Same query works regardless of which servers are enabled
+uv run python -m lab.12_formal_evolution \
+  -q "Verify no privilege escalation in this IAM policy" run
+# → Z3 if enabled, OpenRouter consensus if Z3 disabled, CoT if neither
+```
+
+### 5. Multi-Profile Orchestration — Combined strategy
+
+Maximize coverage by running the same task with different configs and comparing:
+
+```bash
+# Pass 1: Deep research (all discovery tools)
+uv run python -m lab.12_formal_evolution -q "Research Z3 verification patterns" -i 10 run
+
+# Pass 2: Verify findings (only formal tools)
+#   (swap to config with Z3+Lean4, disable web)
+uv run python -m lab.12_formal_evolution -q "Verify the discovered patterns with Z3" -i 10 run
+
+# Pass 3: Distill and log (only student+MLflow)
+#   (swap to distillation config)
+uv run python -m lab.12_formal_evolution -q "Distill verified patterns to student model and log to MLflow" -i 8 run
+```
+
+Each pass is a different tool profile. The agent adapts to what's available
+without any code changes.
+
+### 6. GFL Self-Optimization — The Meta-Adaptation
+
+Beyond tool selection, the `gfl` command optimizes the agent's *instructions*
+across iterations. This is pure prompt evolution — the agent writes better
+prompts for itself over time, making it more effective at tool orchestration
+without any code changes.
+
+```bash
+# Optimize how the agent orchestrates MCP tools
+uv run python -m lab.12_formal_evolution -q "Classify user intent from query text" gfl
+```
+
+The GFL pipeline runs BootstrapFewShot → MIPROv2 → GEPA, each stage refining
+how the agent instructs itself to use the available tools.
+
+---
 
 ## Prerequisites
 
@@ -195,6 +361,8 @@ npx @physics91/openrouter-mcp init
 # arXiv — works out of the box via uvx
 # Filesystem — requires npx (Node.js)
 # Git — works out of the box via uvx
+# MLflow trace management (optional, requires MLflow tracking server)
+pip install 'mlflow[mcp]>=3.5.1'
 
 # Set API keys in .env
 OPENROUTER_API_KEY=sk-or-...
@@ -208,6 +376,7 @@ DEEPSEEK_API_KEY=...
 uv run python -m lab.12_formal_evolution --query "Research Z3 constraint solving" run
 uv run python -m lab.12_formal_evolution --query "Search arXiv for agent papers" run
 uv run python -m lab.12_formal_evolution --query "Verify sorting algorithm with Z3" run
+uv run python -m lab.12_formal_evolution --query "Log verified traces to MLflow and track distillation accuracy" run
 ```
 
 > Full MCP server reference: [`docs/12-formal-evolution.md`](../../docs/12-formal-evolution.md)
@@ -216,8 +385,8 @@ uv run python -m lab.12_formal_evolution --query "Verify sorting algorithm with 
 
 | Aspect | Lab 11 | Lab 12 |
 |--------|--------|--------|
-| MCP servers | crawl4ai, fetch, openrouter (disabled) | 8 servers: +z3-solver✅, arxiv✅, openrouter✅, lean-lsp❌, filesystem❌, git❌ |
-| Agent capabilities | Web research, content analysis | + constraint solving, paper research, multi-model consensus, file ops, git |
+| MCP servers | crawl4ai, fetch, openrouter (disabled) | 9 servers: +z3-solver✅, arxiv✅, openrouter✅, lean-lsp❌, filesystem❌, git❌, mlflow❌ |
+| Agent capabilities | Web research, content analysis | + constraint solving, paper research, multi-model consensus, file ops, git, trace observability |
 | Tool count | ~6 tools | ~40+ tools across all MCP servers |
 | Local dependencies | — | z3_mcp/ cloned in-tree |
 | Code changes | None | None — just config |

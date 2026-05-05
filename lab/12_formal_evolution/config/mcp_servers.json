@@ -54,6 +54,17 @@
       "type": "stdio",
       "command": "uvx",
       "args": ["mcp-server-git", "--repository", "."]
+    },
+    "mlflow": {
+      "description": "MLflow trace management — search, analyze, and log assessments on LLM traces",
+      "enabled": false,
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--with", "mlflow[mcp]>=3.5.1", "mlflow", "mcp", "run"],
+      "env": {
+        "MLFLOW_TRACKING_URI": "http://localhost:5000",
+        "MLFLOW_MCP_TOOLS": "genai"
+      }
     }
   }
 }
