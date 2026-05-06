@@ -31,7 +31,6 @@ from ..memory.frontier import InMemoryFrontier
 from ..dapr.frontier import DaprFrontier
 from ..dapr.lse import DaprLSEOptimizer
 from ..evolution.lse import LSEOptimizer
-from ...shared.research import SATURATION_THRESHOLD
 
 
 @dataclass

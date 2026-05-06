@@ -238,7 +238,6 @@ def dapr_orchestrator(ctx, tracing, dapr_frontier, dapr_lse):
     )
 
     from dapr_agents import AgentRunner
-    from ..shared.config import get_agent_port
     port = get_agent_port("orchestrator")
     runner = AgentRunner()
     query = ctx.obj.get("QUERY", "")
@@ -271,8 +270,6 @@ def dapr_wrap(ctx):
     table.add_column("Module Type", style="yellow")
     table.add_column("DurableAgent", style="magenta")
     table.add_column("Tools")
-
-    from .dapr.wrappers import GeneratedDurableAgent
 
     for d in definitions:
         name = d.get("name", "?")

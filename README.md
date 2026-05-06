@@ -27,6 +27,7 @@ flowchart LR
         P3["11_meta_agent<br/>Dynamic agent generation"]
         P4["12_formal_evolution<br/>Z3 + Lean4 + OpenRouter MCP"]
         P5["13_autonomous_factory<br/>23 MCP servers + verification + IaC"]
+        P6["14_durable_meta_agent<br/>DurableAgent + Dapr production framework"]
     end
     subgraph Util["Utilities"]
         S1["99-sandbox<br/>Scratch space"]
@@ -46,7 +47,7 @@ cp .env.example .env   # fill in DEEPSEEK_API_KEY and configure models
 
 ## Documentation
 
-Complete API reference for every module is in [`docs/`](docs/INDEX.md) — signatures, classes, functions, DSPy modules, and usage patterns for all 13 sub-projects.
+Complete API reference for every module is in [`docs/`](docs/INDEX.md) — signatures, classes, functions, DSPy modules, and usage patterns for all 14 sub-projects.
 
 ## Running
 
@@ -71,6 +72,15 @@ uv run python -m lab.12_formal_evolution --query "Verify sorting algorithm corre
 
 # Autonomous Software Factory: 23 MCP servers, sandboxed execution, IaC
 uv run python -m lab.13_autonomous_factory --query "Research + verify + deploy" run
+
+# Durable Meta-Agent: DSPy + Dapr production framework
+uv run python -m lab.14_durable_meta_agent --query "Research topic" --iterations 10 run
+
+# Dapr mode (requires Dapr sidecar + Redis):
+dapr run --app-id durable-meta-agent --app-protocol grpc --app-port 8000 \
+  --resources-path lab/14_durable_meta_agent/dapr/resources -- \
+  uv run python -m lab.14_durable_meta_agent --query "Research topic" \
+  dapr-orchestrator --tracing --dapr-frontier --dapr-lse
 
 # List MCP servers and run health checks
 uv run python -m lab.13_autonomous_factory list-servers
