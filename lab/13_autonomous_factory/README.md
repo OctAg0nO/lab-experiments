@@ -56,28 +56,39 @@ Action:        Terraform (IaC) + Git (version control) + Filesystem (read/write)
 
 ## Architecture
 
-```
-User Task
-    │
-    ▼
-BestOfN Task Analysis (3 candidates)
-    │
-    ▼
-AgentGenerator → RLM / ReAct / CodeAct / CoT
-    │                              │
-    │    ┌─────────────────────────┘
-    │    ▼
-    MCPBridge (lab/shared/mcp/)
-    │    │
-    │    ├── get_dspy_tools()     → dspy.RLM / dspy.ReAct
-    │    └── get_agent_tools()    → dapr_agents.DurableAgent
-    │
-    ▼
-MetaAgent Loop (MultiChainComparison + Refine + InferRules)
-    │
-    ├──→ GFL Pipeline (BootstrapFewShot → MIPROv2 → GEPA)
-    ├──→ LSE Optimizer (improvement-based reward)
-    └──→ Trace2Skill Consolidation
+```mermaid
+flowchart TB
+    U["User Task"]
+    U --> B["BestOfN Task Analysis<br/>3 candidates"]
+    B --> AG["AgentGenerator"]
+
+    AG --> RLM["RLM<br/>code + tools"]
+    AG --> REACT["ReAct<br/>tools"]
+    AG --> CODEACT["CodeAct<br/>code"]
+    AG --> COT["CoT<br/>reasoning"]
+    AG --> MCPB["MCPBridge<br/>lab/shared/mcp/"]
+
+    MCPB --> DSPY["get_dspy_tools()<br/>→ dspy.RLM / dspy.ReAct"]
+    MCPB --> DAPR["get_agent_tools()<br/>→ dapr_agents.DurableAgent"]
+
+    RLM --> MA
+    REACT --> MA
+    CODEACT --> MA
+    COT --> MA
+
+    MA["MetaAgent Loop<br/>MultiChainComparison<br/>Refine + InferRules"]
+    MA --> GFL["GFL Pipeline<br/>BootstrapFewShot → MIPROv2 → GEPA"]
+    MA --> LSE["LSE Optimizer<br/>improvement-based reward"]
+    MA --> T2S["Trace2Skill<br/>Parallel Consolidation"]
+
+    style U fill:#1e1e4a,stroke:#4a9eff,color:#fff
+    style B fill:#0d2b45,stroke:#4a9eff,color:#fff
+    style AG fill:#0d2b45,stroke:#4a9eff,color:#fff
+    style MCPB fill:#2a0d45,stroke:#9775fa,color:#fff
+    style MA fill:#2a0d45,stroke:#9775fa,color:#fff
+    style GFL fill:#0d452b,stroke:#51cf66,color:#fff
+    style LSE fill:#0d452b,stroke:#51cf66,color:#fff
+    style T2S fill:#0d452b,stroke:#51cf66,color:#fff
 ```
 
 ## Advanced Workflows
@@ -86,62 +97,51 @@ MetaAgent Loop (MultiChainComparison + Refine + InferRules)
 
 **Concept**: The agent is given a research budget and an autonomous mission — discover a problem, research it deeply, verify the solution formally, register the proven knowledge in a knowledge graph, and publish the result. This demonstrates the full **Discovery → Research → Verification → Memory → Publication** lifecycle.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   SELF-FUNDING RESEARCH PIPELINE                 │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph P1["Phase 1 — Neural Discovery (parallel)"]
+        EXA["Exa Search<br/>web_search_exa()"]
+        BRAVE["Brave Search<br/>web_search()"]
+        SCRAP1["Scrapling<br/>stealthy_fetch()"]
+    end
 
-  Phase 1 — Neural Discovery  (parallel, 3 servers)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Exa Search (neural) ──► web_search_exa("recent advances    │
-  │  Brave Search (web)  ──► in distributed consensus")         │
-  │  Scrapling (stealth) ──► scrape top results for deep content │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ raw findings
-                              ▼
-  Phase 2 — Academic Deep-Dive  (parallel, 2 servers)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  ArXiv MCP ──► search_papers() → download_paper() →        │
-  │                  read_paper() — full text extraction        │
-  │  Scrapling ──► stealthy_fetch() — bypass paywalls/cloudflare│
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ theorems, proofs, algorithms
-                              ▼
-  Phase 3 — Multi-Model Consensus  (parallel, 3 models)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  OpenRouter ──► Claude 3.5 Opus: formalize the algorithm    │
-  │             ──► GPT-4o:      identify edge cases            │
-  │             ──► Gemini 2.0:  propose invariants             │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ formal spec + invariants
-                              ▼
-  Phase 4 — Formal Verification  (iterative SAT/UNSAT loop)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Z3 SMT Solver ──► encode invariants as SMT-LIB constraints │
-  │                  ──► solve_constraint_problem()             │
-  │                                                              │
-  │     ┌── SAT (counter-example) ──► refine constraints ──┐    │
-  │     │                          ▲                       │    │
-  │     └──────────────────────────┘                       │    │
-  │     ▼                                                   │    │
-  │     UNSAT ──► proof certificate generated               │    │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ verified proof
-                              ▼
-  Phase 5 — Knowledge Registration  (parallel, 3 servers)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  FalkorDB ──► CREATE (algorithm:Verified {proof, z3_cert}) │
-  │  MLflow    ──► log_trace(teacher_run, "gold_standard")     │
-  │  Git       ──► commit verified code + proof certificate    │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ registered + committed
-                              ▼
-  Phase 6 — Report & Distill  (optional student training)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Filesystem ──► write research report                       │
-  │  OpenRouter  ──► distill to student model                   │
-  │  MLflow      ──► compare teacher/student accuracy           │
-  └─────────────────────────────────────────────────────────────┘
+    subgraph P2["Phase 2 — Academic Deep-Dive (parallel)"]
+        ARXIV["ArXiv MCP<br/>search → download → read"]
+        SCRAP2["Scrapling<br/>stealthy_fetch()"]
+    end
+
+    subgraph P3["Phase 3 — Multi-Model Consensus (parallel)"]
+        CLAUDE["Claude Opus<br/>formalize algorithm"]
+        GPT["GPT-4o<br/>identify edge cases"]
+        GEMINI["Gemini 2.0<br/>propose invariants"]
+    end
+
+    subgraph P4["Phase 4 — Formal Verification (SAT/UNSAT loop)"]
+        Z3["Z3 SMT Solver<br/>solve_constraint_problem()"]
+        REFINE["refine constraints"]
+        PROOF["Proof Certificate<br/>UNSAT"]
+        Z3 -->|SAT counter-example| REFINE
+        REFINE --> Z3
+        Z3 -->|UNSAT| PROOF
+    end
+
+    subgraph P5["Phase 5 — Knowledge Registration (parallel)"]
+        FALK["FalkorDB<br/>CREATE Verified {proof}"]
+        MLF["MLflow<br/>log_trace gold_standard"]
+        GIT["Git<br/>commit code + proof"]
+    end
+
+    subgraph P6["Phase 6 — Report & Distill"]
+        FS["Filesystem<br/>write report"]
+        OR["OpenRouter<br/>distill to student"]
+        MLC["MLflow<br/>compare accuracy"]
+    end
+
+    P1 -->|raw findings| P2
+    P2 -->|theorems + proofs| P3
+    P3 -->|formal spec + invariants| P4
+    P4 -->|verified proof| P5
+    P5 -->|registered + committed| P6
 ```
 
 **What the agent actually does** (autonomously discovered at runtime):
@@ -166,96 +166,60 @@ Key capabilities demonstrated:
 
 **Concept**: A financial compliance agent that audits a multi-tier rewards algorithm, a smart contract invariant, or an IAM policy — combining heuristic security scanning, symbolic mathematics, formal verification, sandboxed execution, infrastructure deployment, and cryptographic audit logging into a single autonomous workflow.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                 ZERO-TRUST FINTECH AUDITOR                       │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    INPUT["User: payout = balance × rate × tier(balance)"]
 
-  Input: "Audit this rewards algorithm and prove it safe"
-  ┌─────────────────────────────────────────────────────────────┐
-  │  User provides: payout = balance * rate * tier(balance)    │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │
-                              ▼
-  Phase 1 — Heuristic Gate  (fast rejection of obvious issues)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Snyk Security ──► snyk_code_scan(payout_formula.py)       │
-  │                  ──► snyk_sca_scan(dependencies)           │
-  │                  ──► snyk_iac_scan(deployment.yaml)        │
-  │                                                              │
-  │  ┌── Vulnerabilities found? ──► agent auto-fixes ──┐       │
-  │  │                       ▲                         │       │
-  │  └───────────────────────┘                         │       │
-  │  ▼                                                   │       │
-  │  Clean ──► proceed to formal verification             │       │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ sanitized code
-                              ▼
-  Phase 2 — Symbolic Math  (compute ground truth)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Wolfram Alpha ──► ask_llm("derivative of payout formula  │
-  │                   w.r.t. balance")                          │
-  │                 ──► get_simple_answer("max payout rate")    │
-  │                                                              │
-  │  Computes: d(payout)/d(balance) = rate * tier(balance)      │
-  │           + balance * rate * d(tier)/d(balance)              │
-  │  Identifies: payout grows linearly within tiers,             │
-  │              jumps at tier boundaries → potential exploit    │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ math ground truth + vulnerability
-                              ▼
-  Phase 3 — Formal SAT/UNSAT Loop  (prove or find counter-example)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Z3 SMT Solver ──► encode: payout <= balance * max_rate    │
-  │                  ──► encode: ∀t ∈ tiers, payout_t <= limit │
-  │                  ──► encode: no_escalation(tier_jumps)     │
-  │                                                              │
-  │  Iteration 1: SAT ──► counter-example: balance=999.99      │
-  │    at tier boundary, rounding causes payout > deposit       │
-  │                                                              │
-  │  Agent fixes: floor() before tier lookup, strict < checks  │
-  │                                                              │
-  │  Iteration 2: SAT ──► counter-example: floating point       │
-  │    at 10^6 scale causes precision loss                      │
-  │                                                              │
-  │  Agent fixes: Decimal arithmetic, saturating guards         │
-  │                                                              │
-  │  Iteration 3: UNSAT ──► no violation possible               │
-  │  Proof certificate: {iterations: 3, constraints: 12,         │
-  │   model: UNSAT, fixed_vulns: ["tier_jump", "fp_precision"]} │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ UNSAT proof certificate
-                              ▼
-  Phase 4 — Sandboxed Validation  (runtime verification)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  E2B Sandbox ──► spawn sandboxed Python                    │
-  │               ──► run stress test: all tier boundaries     │
-  │               ──► run Monte Carlo: 10^6 random balances    │
-  │               ──► verify: no payout > deposit EVER         │
-  │                                                              │
-  │  Result: 0 failures across 1,000,006 test cases             │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ runtime proof
-                              ▼
-  Phase 5 — Deploy Verified IaC  (infrastructure as code)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Terraform MCP ──► list_workspaces()                       │
-  │                ──► create_run("deploy-verified-rewards")   │
-  │                ──► apply_run(run_id) — deploy to staging   │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ deployed
-                              ▼
-  Phase 6 — Audit Trail  (cryptographic evidence)
-  ┌─────────────────────────────────────────────────────────────┐
-  │  MLflow MCP ──► log_trace("audit_rewards_v3", {            │
-  │    heuristic_gate: "passed", vulns_fixed: 2,               │
-  │    z3_iterations: 3, z3_result: "UNSAT",                   │
-  │    sandbox_tests: 1000006, sandbox_failures: 0,            │
-  │    deployed_to: "staging", timestamp: ISO8601              │
-  │  })                                                         │
-  │  Git MCP ──► commit verified code + proof + audit trail    │
-  │  Filesystem ──► write audit_report.pdf                     │
-  └─────────────────────────────────────────────────────────────┘
+    subgraph PH1["Phase 1 — Heuristic Gate"]
+        SNYK["Snyk Security<br/>code_scan + sca_scan + iac_scan"]
+        FIX{"Vulnerabilities?"}
+        SNYK --> FIX
+        FIX -->|yes| AUTOFIX["agent auto-fixes"]
+        AUTOFIX --> SNYK
+        FIX -->|clean| SANITIZED["sanitized code"]
+    end
+
+    subgraph PH2["Phase 2 — Symbolic Math"]
+        WA["Wolfram Alpha<br/>ask_llm + get_simple_answer"]
+        WA -->|derivative + rate analysis| GROUND["math ground truth<br/>tier boundary exploit identified"]
+    end
+
+    subgraph PH3["Phase 3 — SAT/UNSAT Loop"]
+        Z3["Z3 SMT Solver"]
+        Z3 --> IT1["Iteration 1: SAT<br/>counter-example at tier boundary"]
+        IT1 --> FIX1["Fix: floor() + strict <"]
+        FIX1 --> Z3
+        Z3 --> IT2["Iteration 2: SAT<br/>floating-point precision loss"]
+        IT2 --> FIX2["Fix: Decimal arithmetic"]
+        FIX2 --> Z3
+        Z3 --> UNSAT["Iteration 3: UNSAT<br/>Proof certificate generated"]
+    end
+
+    subgraph PH4["Phase 4 — Sandboxed Validation"]
+        E2B["E2B Sandbox<br/>spawn Python sandbox"]
+        E2B --> STRESS["stress test: tier boundaries"]
+        STRESS --> MC["Monte Carlo: 10^6 balances"]
+        MC --> RUNTIME["Result: 0 failures<br/>1,000,006 test cases"]
+    end
+
+    subgraph PH5["Phase 5 — Deploy Verified IaC"]
+        TF["Terraform MCP<br/>list_workspaces"]
+        TF --> CREATE["create_run()"]
+        CREATE --> APPLY["apply_run()<br/>→ deploy to staging"]
+    end
+
+    subgraph PH6["Phase 6 — Audit Trail"]
+        MLOG["MLflow<br/>log_trace audit_rewards_v3"]
+        GIT2["Git<br/>commit verified code + proof"]
+        FS2["Filesystem<br/>write audit_report.pdf"]
+    end
+
+    INPUT --> PH1
+    SANITIZED --> PH2
+    GROUND --> PH3
+    UNSAT --> PH4
+    RUNTIME --> PH5
+    APPLY --> PH6
 ```
 
 **What the agent actually does — zero-code, purely from MCP tool descriptions:**
@@ -289,127 +253,52 @@ Key capabilities demonstrated:
 
 This is the capstone meta-workflow — the system improving itself.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              SELF-EVOLVING KNOWLEDGE FACTORY                     │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    WATCHER["MLflow Watcher<br/>checks every N runs"]
+    WATCHER --> ALERT{"student_acc &lt;<br/>teacher_acc × 0.85?"}
 
-  ┌─────────────────────────────────────────────────────────────┐
-  │  MLflow Watcher (background daemon — checks every N runs)   │
-  │                                                              │
-  │  for each student_model in registry:                         │
-  │    teacher_acc = mlflow.get_latest("teacher", model)         │
-  │    student_acc = mlflow.get_latest("student", model)         │
-  │                                                              │
-  │    if student_acc < teacher_acc * 0.85:                      │
-  │      trigger("re-optimize", model=model, gap=...)           │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ degradation detected!
-                              ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │  ALERT: Student accuracy 0.72 vs Teacher 0.91 (gap: 0.19)  │
-  │  ┌─ Model: distilled_gemma4_solver                          │
-  │  └─ Threshold: 0.85 * 0.91 = 0.7735                         │
-  │  Action: GFL re-optimization pipeline triggered             │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │
-                              ▼
-  ┌─── Phase 1 ─── Historical Analysis ───────────────────────────┐
-  │  Parallel query across memory systems:                        │
-  │                                                              │
-  │  FalkorDB ──► MATCH (m:Model)-[:DISTILLED_FROM]->(t:Teacher) │
-  │               WHERE m.name = 'gemma4_solver'                  │
-  │               RETURN t.name, m.accuracy, t.accuracy            │
-  │                                                              │
-  │  Postgres  ──► SELECT AVG(accuracy), stddev_pop(accuracy)    │
-  │               FROM deployments                                │
-  │               WHERE model = 'gemma4_solver'                   │
-  │               AND deployed_at > NOW() - INTERVAL '7 days'     │
-  │                                                              │
-  │  OpenRouter ──► cross-validate: why does student degrade?    │
-  │    Claude: "Student fails on edge cases the teacher handles  │
-  │            via Z3 verification — missing the iteration loop" │
-  │    GPT-4o: "Student overfits to common patterns, loses       │
-  │            rare-case reasoning"                               │
-  │    Gemini: "Recommended: augment training set with hard       │
-  │            counter-examples from Z3's SAT returns"             │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ diagnosis: missing CEGAR loop
-                              ▼
-  ┌─── Phase 2 ─── GFL Re-Optimization ──────────────────────────┐
-  │  Meta-agent re-enters the Generative Feedback Loop:           │
-  │                                                              │
-  │  Step 1: BootstrapFewShot                                     │
-  │    ├─ Extract new demos from recent successful teacher runs  │
-  │    └─ Attach to student: 8 new demonstrations                │
-  │                                                              │
-  │  Step 2: MIPROv2                                              │
-  │    ├─ Propose 16 instruction variants                         │
-  │    ├─ Bayesian search over instruction + demo space           │
-  │    └─ Select best: "Always verify constraints with Z3 first" │
-  │                                                              │
-  │  Step 3: GEPA                                                 │
-  │    ├─ Execute student on validation set                       │
-  │    ├─ Read failure traces                                     │
-  │    ├─ Diagnose: "Student skips Z3 verification when           │
-  │    │            confidence > 0.9 — but edge cases exist"      │
-  │    ├─ Mutate instruction: "Verify ALL constraints with Z3,   │
-  │    │   regardless of confidence level"                        │
-  │    └─ Pareto frontier selects best mutation                   │
-  │                                                              │
-  │  Step 4: Sequential GEPA → BootstrapFewShot                   │
-  │    ├─ GEPA optimizes instructions first                       │
-  │    └─ BootstrapFewShot attaches demos to optimized instr.     │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ re-optimized student
-                              ▼
-  ┌─── Phase 3 ─── Knowledge Augmentation ───────────────────────┐
-  │  The optimized student needs better training data.            │
-  │  The agent generates it autonomously:                        │
-  │                                                              │
-  │  sequential-thinking MCP ──► decompose the problem space:    │
-  │    thought_sequence:                                          │
-  │      ["The student fails on edge cases",                     │
-  │       "Edge cases = Z3 SAT counter-examples",                │
-  │       "Use the teacher to generate more SAT examples",       │
-  │       "Each SAT example + fix = training pair",               │
-  │       "Augment training set with counter-example pairs"]     │
-  │                                                              │
-  │  Teacher (OpenRouter + Z3) generates fresh training data:    │
-  │    for _ in range(50):                                        │
-  │      formula = teacher.propose_constraint()                  │
-  │      result = z3.solve(formula)                              │
-  │      if result.status == "SAT":                               │
-  │        pair = (formula, result.counter_example, fix)         │
-  │        training_set.append(pair)                              │
-  │                                                              │
-  │  FalkorDB: register new training pairs as graph relationships │
-  │    MATCH (c:Constraint)-[:HAS_COUNTEREXAMPLE]->(ce:Example)  │
-  │    CREATE (ce)-[:TRAINS]->(s:Student {name: 'gemma4_v2'})    │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ augmented training set
-                              ▼
-  ┌─── Phase 4 ─── Distill & Deploy ─────────────────────────────┐
-  │  OpenRouter (teacher) ──► generate verified solutions        │
-  │  MLflow ──► log teacher traces as "gold_standard"            │
-  │  Z3 ──► verify each trace → only UNSAT passes semantic       │
-  │         firewall                                              │
-  │  BootstrapFewShot ──► distill gemma4_v2 from verified traces │
-  │  E2B ──► sandbox test the new student                         │
-  │  MLflow ──► log student_vs_teacher accuracy                  │
-  │                                                              │
-  │  ┌── accuracy >= 0.85? ──► register new model ──► deploy    │
-  │  │                       ──► Git commit                      │
-  │  │                       ──► FalkorDB: mark as active        │
-  │  │                                                              │
-  │  └── accuracy < 0.85? ──► GOTO Phase 2 (re-optimize again)  │
-  └───────────────────────────┬─────────────────────────────────┘
-                              │ deployed: gemma4_solver_v2
-                              ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │  MLflow Watcher (resumes monitoring — now watches v2)       │
-  │  "All quiet. Next check in 24 hours."                        │
-  └─────────────────────────────────────────────────────────────┘
+    ALERT -->|no| IDLE["All quiet<br/>next check in 24h"]
+    ALERT -->|yes: gap 0.19| DIAG
+
+    subgraph DIAG["Phase 1 — Historical Analysis"]
+        FALK1["Fal korDB<br/>MATCH model→teacher accuracy"]
+        PG["Postgres<br/>SELECT AVG(deployment accuracy)"]
+        OR1["OpenRouter<br/>cross-model root cause"]
+        FALK1 & PG & OR1 --> DXDX["Diagnosis: missing<br/>CEGAR verification loop"]
+    end
+
+    subgraph GFL["Phase 2 — GFL Re-Optimization"]
+        direction TB
+        BS1["BootstrapFewShot<br/>8 new demos from teacher"]
+        BS1 --> MP["MIPROv2<br/>16 instruction variants<br/>Bayesian search"]
+        MP --> GEPA["GEPA<br/>read failure traces<br/>diagnose → mutate → Pareto"]
+        GEPA --> SEQ["Sequential GEPA→BS<br/>instructions then demos"]
+    end
+
+    subgraph AUG["Phase 3 — Knowledge Augmentation"]
+        ST["sequential-thinking MCP<br/>decompose problem space"]
+        GEN["Teacher generates 50<br/>SAT counter-example pairs"]
+        FALK2["Fal korDB<br/>register pairs as graph<br/>relationships"]
+        ST & GEN --> FALK2
+    end
+
+    subgraph DEPLOY["Phase 4 — Distill & Deploy"]
+        TCH["OpenRouter teacher<br/>generates verified solutions"]
+        Z3FW["Z3 semantic firewall<br/>only UNSAT passes"]
+        BFS["BootstrapFewShot<br/>distill gemma4_v2"]
+        E2B2["E2B sandbox<br/>test student"]
+        MLC2["MLflow<br/>compare accuracy"]
+        TCH --> Z3FW --> BFS --> E2B2 --> MLC2
+        MLC2 --> CHECK{"accuracy ≥ 0.85?"}
+        CHECK -->|yes| REG["Fal korDB: mark active<br/>Git: commit<br/>Deploy: registered"]
+        CHECK -->|no| GFL
+    end
+
+    DIAG --> GFL
+    GFL --> AUG
+    AUG --> DEPLOY
+    REG -->|v2 deployed| WATCHER
 ```
 
 **What the agent actually does — the system self-diagnoses and self-heals:**
@@ -550,28 +439,42 @@ https://octagono.org/blog/trace2skill/
 
 ### How They Combine in the Meta-Agent
 
-```
-          ┌─────────────────────────────────────────────────────┐
-          │                 META-AGENT LOOP                       │
-          └─────────────────────────────────────────────────────┘
-                        │
-          ┌─────────────┼─────────────┐
-          ▼             ▼             ▼
-┌─────────────────┐ ┌──────────┐ ┌──────────────┐
-│  GFL Pipeline   │ │   LSE    │ │  Trace2Skill  │
-│  (evolution/    │ │(evolution│ │ (evolution/   │
-│   gfl.py)       │ │ /lse.py) │ │  trace2skill  │
-│                 │ │          │ │  .py)         │
-│ BootstrapFewShot│ │ Quality  │ │ Parallel      │
-│ → MIPROv2       │ │ deltas → │ │ patch proposal│
-│ → GEPA          │ │ policy   │ │ → conflict-   │
-│ → Sequential    │ │ update   │ │ free merge    │
-└────────┬────────┘ └────┬─────┘ └──────┬────────┘
-         │               │              │
-         ▼               ▼              ▼
-    Optimized       Self-evolving   Consolidated
-    prompts &       agent           transferable
-    demos           strategy        skills
+```mermaid
+flowchart TB
+    MA["Meta-Agent Loop"]
+    MA --> GFL
+    MA --> LSE
+    MA --> T2S
+
+    subgraph GFL["GFL Pipeline — evolution/gfl.py"]
+        direction TB
+        BS["BootstrapFewShot"]
+        MP["MIPROv2"]
+        GP["GEPA"]
+        SQ["Sequential"]
+        BS --> MP --> GP --> SQ
+    end
+
+    subgraph LSE["LSE — evolution/lse.py"]
+        QD["Quality deltas"]
+        PU["Policy update"]
+        QD --> PU
+    end
+
+    subgraph T2S["Trace2Skill — evolution/trace2skill.py"]
+        PP["Parallel patch proposal"]
+        CF["Conflict-free merge"]
+        PP --> CF
+    end
+
+    GFL --> O1["Optimized prompts + demos"]
+    LSE --> O2["Self-evolving strategy"]
+    T2S --> O3["Transferable skills"]
+
+    style MA fill:#2a0d45,stroke:#9775fa,color:#fff
+    style GFL fill:#0d452b,stroke:#51cf66,color:#fff
+    style LSE fill:#0d452b,stroke:#51cf66,color:#fff
+    style T2S fill:#0d452b,stroke:#51cf66,color:#fff
 ```
 
 1. **GFL** optimizes the *local* parameters — prompt instructions and few-shot demonstrations — for each generated agent module
