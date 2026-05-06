@@ -36,7 +36,7 @@ flowchart TB
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| Reasoning engine | **DSPy** — signatures, optimizers, modules | All ML logic: task analysis, agent generation, selection, execution, optimization |
+| Reasoning engine | **DSPy** — modules, signatures, adapters, optimizers | All ML logic: `dspy.RLM` (recursive code+tools), `dspy.ReAct` (tool loop), `dspy.CodeAct` (code-only), `dspy.ChainOfThought` (reasoning), `BAMLAdapter` (structured output via Pydantic) |
 | Tool integration | **MCP** — Model Context Protocol | Tool discovery, auth, health checks, dual-format bridge |
 | Durability | **Dapr** — Distributed Application Runtime | Workflow checkpointing, state persistence, observability, retry, secrets |
 
@@ -165,6 +165,17 @@ meta = MetaAgent(
 ## Key Design Decisions
 
 ### DSPy Is the Engine, Dapr Is the Chassis
+
+DSPy is configured with `BAMLAdapter` (`dspy.adapters.baml_adapter.BAMLAdapter`) for structured output parsing. This adapter enables Pydantic models (e.g., `ExplorationResult`, `DeepReadResult`, `SynthesisReport`, `Critique` in `agents/research_agents.py`) as first-class output types in DSPy signatures. All DSPy modules throughout the lab benefit from type-validated, schema-enforced outputs — no raw JSON parsing, no prompt-instructed formatting.
+
+The `AgentGenerator` selects the DSPy module type based on the agent's needs:
+
+| Condition | Module | Capability |
+|-----------|--------|------------|
+| `use_code=True` + tools | `dspy.RLM` | Full REPL agent — runs Python, calls MCP tools, sub-LLM queries |
+| Has tools (no code) | `dspy.ReAct` | Tool-using agent with thought-action-observation loop |
+| `use_code=True` only | `dspy.CodeAct` | Code-capable agent without tool dependencies |
+| Neither | `dspy.ChainOfThought` | Plain CoT with dynamically-created signature class via `type()` |
 
 DSPy is NOT replaced. Dapr is NOT an alternative to DSPy. **DSPy handles all reasoning. Dapr handles all infrastructure.** The `GeneratedDurableAgent` wraps a DSPy module without modifying it:
 
