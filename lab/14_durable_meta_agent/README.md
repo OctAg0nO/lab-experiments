@@ -4,10 +4,34 @@
 
 ## Architecture
 
-```
-Durable Agent Shell (Dapr)
-    └── DSPy Module (RLM / ReAct / CodeAct / CoT)   ← unchanged
-         └── MCP Tools (MCPBridge)                   ← unchanged
+```mermaid
+flowchart TB
+    subgraph DAPR["Dapr Durability Layer"]
+        WFE["@workflow_entry<br/>checkpointing"]
+        OBS["AgentObservabilityConfig<br/>Zipkin spans"]
+        STS["StateStoreService<br/>Redis persistence"]
+        RTR["WorkflowRetryPolicy<br/>exponential backoff"]
+    end
+
+    subgraph DSPY["DSPy Reasoning Engine (unchanged)"]
+        AG["AgentGenerator<br/>BestOfN → RLM/ReAct/CodeAct/CoT"]
+        MC["MultiChainComparison<br/>agent selection"]
+        RF["Refine<br/>prompt self-adaptation"]
+        GF["GFL Pipeline<br/>BootstrapFewShot → MIPROv2 → GEPA"]
+        LS["LSE Optimizer<br/>improvement-based reward"]
+        T2["Trace2Skill<br/>parallel consolidation"]
+    end
+
+    subgraph MCP["MCP Tool Layer (unchanged)"]
+        BR["MCPBridge"]
+        DSP["get_dspy_tools()<br/>→ dspy.RLM/ReAct"]
+        DAP["get_agent_tools()<br/>→ AgentTool"]
+    end
+
+    DAPR --> DSPY
+    DSPY --> MCP
+    BR --> DSP
+    BR --> DAP
 ```
 
 | Layer | Technology | Role |
@@ -104,7 +128,29 @@ dapr run -f lab/14_durable_meta_agent/dapr/multi-app-run.yaml
 
 ## The Dual-Path Pattern
 
-Every subsystem follows the same ABC pattern inherited from Lab 10:
+Every subsystem follows the same ABC pattern inherited from Lab 10 — in-memory for dev, Dapr for production:
+
+```mermaid
+flowchart LR
+    subgraph ABC["ResearchFrontier ABC"]
+        NF["next_action()<br/>absorb_findings()<br/>seed_from_query()"]
+    end
+
+    subgraph IM["InMemoryFrontier<br/>(dev, no infra)"]
+        IM1["in-memory dict<br/>UCB selection"]
+    end
+
+    subgraph DP["DaprFrontier<br/>(production)"]
+        DP1["Redis-backed<br/>dirty-flag persistence<br/>batch saturation"]
+    end
+
+    ABC --> IM
+    ABC --> DP
+```
+
+Same pattern applies to AgentStack/DaprAgentStack and LSEOptimizer/DaprLSEOptimizer.
+
+Swap without changing any DSPy code:
 
 ```python
 meta = MetaAgent(
@@ -180,17 +226,46 @@ Lab 14 supports running a **swarm of meta agents** that coordinate via Dapr pub/
 
 ### Architecture
 
-```
-SwarmCoordinator (port 8000)          ── owns DaprFrontier
-  │
-  ├── call_agent() ──► SwarmMetaAgent A (domain: research, port 8001)
-  │                        └── generates DSPy sub-agents
-  │
-  ├── call_agent() ──► SwarmMetaAgent B (domain: verification, port 8002)
-  │                        └── generates DSPy sub-agents
-  │
-  └── call_agent() ──► SwarmMetaAgent C (domain: synthesis, port 8003)
-                             └── generates DSPy sub-agents
+```mermaid
+flowchart TB
+    subgraph REDIS["Dapr State / Redis"]
+        FR["DaprFrontier<br/>research directions"]
+        LS["LSE runs<br/>quality history"]
+        AS["DaprAgentStack<br/>agent registry"]
+    end
+
+    COORD["SwarmCoordinator<br/>port 8000"]
+    COORD --> FR
+    COORD --> LS
+    COORD --> AS
+
+    COORD -->|call_agent| W1
+    COORD -->|call_agent| W2
+    COORD -->|call_agent| W3
+    COORD -->|publish| PS["Dapr Pub/Sub<br/>swarm.tasks"]
+
+    subgraph W1["SwarmMetaAgent A<br/>port 8001 · research"]
+        AG1["AgentGenerator<br/>DSPy sub-agents"]
+        RC1["run_stack()<br/>frontier exploration"]
+    end
+
+    subgraph W2["SwarmMetaAgent B<br/>port 8002 · verification"]
+        AG2["AgentGenerator<br/>DSPy sub-agents"]
+        RC2["run_stack()<br/>frontier exploration"]
+    end
+
+    subgraph W3["SwarmMetaAgent C<br/>port 8003 · synthesis"]
+        AG3["AgentGenerator<br/>DSPy sub-agents"]
+        RC3["run_stack()<br/>frontier exploration"]
+    end
+
+    W1 -->|publish discovery| PS
+    W2 -->|publish discovery| PS
+    W3 -->|publish discovery| PS
+    W1 -->|heartbeat| PS
+    W2 -->|heartbeat| PS
+    W3 -->|heartbeat| PS
+    PS -->|collect| COORD
 ```
 
 ### Message Protocol
@@ -202,6 +277,34 @@ SwarmCoordinator (port 8000)          ── owns DaprFrontier
 | `SwarmHeartbeat` | `swarm.heartbeat` | Worker | Liveness signal (alive/busy/error, load, task counts) |
 | `SwarmInquiry` | `swarm.inquiry` | Any agent | A2A question to another agent |
 | `SwarmResponse` | `swarm.response` | Any agent | A2A answer with correlation_id matching |
+
+### A2A Protocol Flow
+
+```mermaid
+sequenceDiagram
+    participant C as SwarmCoordinator
+    participant PS as Dapr Pub/Sub
+    participant W1 as SwarmMetaAgent A
+    participant W2 as SwarmMetaAgent B
+
+    C->>FR: frontier.next_action()
+    C->>PS: publish swarm.tasks
+    PS->>W1: @message_router on_task()
+    Note over W1: run_stack(direction)
+    W1->>PS: publish swarm.discoveries
+    PS->>C: collect discovery
+    C->>FR: frontier.absorb_findings()
+
+    W1->>PS: publish swarm.inquiry
+    PS->>W2: @message_router on_inquiry()
+    W2->>PS: publish swarm.response
+    PS->>W1: correlation_id matched
+
+    W1->>PS: publish swarm.heartbeat (30s)
+    W2->>PS: publish swarm.heartbeat (30s)
+    C->>PS: subscribe swarm.heartbeat
+    Note over C: timeout 90s → reassign
+```
 
 ### Key Design Decisions
 
