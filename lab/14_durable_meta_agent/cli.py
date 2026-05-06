@@ -293,6 +293,101 @@ def dapr_wrap(ctx):
         bridge.client.close()
 
 
+# ---------------------------------------------------------------------------
+# Swarm commands (multi-agent coordination via Dapr pub/sub)
+# ---------------------------------------------------------------------------
+
+
+@cli.command(name="swarm-coordinator")
+@click.option("--tracing", is_flag=True, default=False, help="Enable Zipkin tracing")
+@click.option("--workers", default=2, show_default=True, help="Expected worker count")
+@click.pass_context
+def swarm_coordinator(ctx, tracing, workers):
+    """Start SwarmCoordinator — dispatches tasks to worker agents.
+
+    Owns the frontier, routes research directions to SwarmMetaAgents
+    via call_agent(). Workers must be running separately.
+    """
+    bridge = _get_bridge()
+    tool_defs = bridge.tool_defs if bridge else []
+    generator = AgentGenerator(ctx.obj["DIRECT_LM"], tool_defs, bridge=bridge)
+
+    from .swarm.coordinator import SwarmCoordinator
+
+    agent = SwarmCoordinator(enable_tracing=tracing)
+    from dapr_agents import AgentRunner
+    runner = AgentRunner()
+    query = ctx.obj.get("QUERY", "")
+    port = get_agent_port("orchestrator")
+    console.print(f"[bold cyan]SwarmCoordinator[/] on port {port}")
+    console.print(f"  Query: {query}")
+    console.print(f"  Workers expected: {workers}")
+    runner.serve(agent, port=port, input={
+        "query": query,
+        "worker_app_ids": [f"swarm-worker-{i}" for i in range(workers)],
+    })
+
+
+@cli.command(name="swarm-worker")
+@click.option("--domain", default="general", help="Research domain for this worker")
+@click.option("--worker-id", default="swarm-worker-0", help="Unique worker ID")
+@click.option("--port", default=8001, type=int, help="HTTP port")
+@click.option("--tracing", is_flag=True, default=False, help="Enable Zipkin tracing")
+@click.pass_context
+def swarm_worker(ctx, domain, worker_id, port, tracing):
+    """Start SwarmMetaAgent — subscribes to swarm tasks.
+
+    Receives research directions from the SwarmCoordinator via pub/sub,
+    executes the DSPy research loop, and publishes findings back.
+    """
+    bridge = _get_bridge()
+    tool_defs = bridge.tool_defs if bridge else []
+    generator = AgentGenerator(ctx.obj["DIRECT_LM"], tool_defs, bridge=bridge)
+
+    from .swarm.worker import SwarmMetaAgent
+    from .core.durable_meta_agent import DurableMetaConfig
+
+    agent = SwarmMetaAgent(
+        generator=generator,
+        tool_defs=tool_defs,
+        skills_dir=str(BASE_DIR / "memory" / "skills"),
+        budget=ctx.obj["BUDGET"],
+        config=DurableMetaConfig(enable_tracing=tracing),
+        agent_id=worker_id,
+        domain=domain,
+    )
+    console.print(f"[bold cyan]SwarmMetaAgent[/] {worker_id} on port {port} (domain: {domain})")
+    agent.run_worker(port=port)
+
+
+@cli.command(name="swarm")
+@click.option("--workers", default=2, show_default=True, help="Number of worker agents")
+@click.option("--tracing", is_flag=True, default=False, help="Enable Zipkin tracing")
+@click.pass_context
+def swarm(ctx, workers, tracing):
+    """Run a full swarm in-process (coordinator + workers).
+
+    Starts the coordinator and N worker agents in the same process
+    for testing. In production, use swarm-coordinator and swarm-worker
+    as separate Dapr apps.
+    """
+    bridge = _get_bridge()
+    tool_defs = bridge.tool_defs if bridge else []
+    generator = AgentGenerator(ctx.obj["DIRECT_LM"], tool_defs, bridge=bridge)
+
+    from .swarm.coordinator import SwarmCoordinator
+    from .swarm.worker import SwarmMetaAgent
+    from .core.durable_meta_agent import DurableMetaConfig
+
+    coordinator = SwarmCoordinator(enable_tracing=tracing)
+
+    console.print(f"[bold cyan]Swarm[/] with {workers} workers")
+    console.print(f"  Query: {ctx.obj.get('QUERY', '')}")
+    console.print(f"  Tracing: {'on' if tracing else 'off'}")
+    console.print("  [dim]Use swarm-coordinator and swarm-worker separately in production[/]")
+    console.print(f"\nFrontier: {coordinator.frontier.summary()}")
+
+
 def main():
     cli()
 

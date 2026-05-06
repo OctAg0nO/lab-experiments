@@ -37,10 +37,15 @@ dapr/
 ├── wrappers.py              # GeneratedDurableAgent, wrap_module()
 ├── frontier.py              # DaprFrontier (ported from Lab 10)
 ├── lse.py                   # DaprLSEOptimizer
-├── resources/               # Dapr component YAMLs
+├── resources/               # Dapr component YAMLs (state, pubsub, secrets, config)
 ├── multi-app-run.yaml
+├── swarm-multi-app-run.yaml # 4-app swarm: coordinator + 3 workers
 core/
 └── durable_meta_agent.py    # DurableMetaAgent — Dapr wrapper around DSPy MetaAgent
+swarm/
+├── coordinator.py           # SwarmCoordinator — dispatches tasks, owns frontier
+├── worker.py                # SwarmMetaAgent — subscribes to tasks, publishes findings
+├── messages.py              # Pydantic A2A message models (task, discovery, heartbeat, inquiry)
 ```
 
 ## CLI Commands
@@ -61,6 +66,14 @@ New Dapr commands:
 ```text
 dapr-orchestrator  Start DurableMetaAgent as a Dapr service (requires Dapr sidecar)
 dapr-wrap          Show how agents would be wrapped for Dapr deployment
+```
+
+Swarm commands (multi-agent coordination):
+
+```text
+swarm-coordinator  Start SwarmCoordinator — dispatches tasks to workers via call_agent()
+swarm-worker       Start SwarmMetaAgent — subscribes to swarm.tasks, publishes findings
+swarm              Run full swarm in-process (coordinator + workers) for testing
 ```
 
 ## Running
@@ -160,6 +173,58 @@ for iteration, direction, entry, prediction, quality, state in meta.run_stack_it
 ### Failed Commands Removed
 
 The original Lab 13 CLI had 6 commands (`optimize`, `distill`, and incorrectly-wired `generate`/`run`/`stack`/`gfl`) that referenced non-existent methods on `MetaAgent`/`GFLPipeline`. These were removed or fixed. The remaining commands now call the correct APIs: `generate_agents()`, `run_stack()`, `snapshot()`.
+
+## Swarm Mode: Multi-Agent Coordination
+
+Lab 14 supports running a **swarm of meta agents** that coordinate via Dapr pub/sub and A2A (Agent-to-Agent) protocol.
+
+### Architecture
+
+```
+SwarmCoordinator (port 8000)          ── owns DaprFrontier
+  │
+  ├── call_agent() ──► SwarmMetaAgent A (domain: research, port 8001)
+  │                        └── generates DSPy sub-agents
+  │
+  ├── call_agent() ──► SwarmMetaAgent B (domain: verification, port 8002)
+  │                        └── generates DSPy sub-agents
+  │
+  └── call_agent() ──► SwarmMetaAgent C (domain: synthesis, port 8003)
+                             └── generates DSPy sub-agents
+```
+
+### Message Protocol
+
+| Message | Topic | Source | Description |
+|---------|-------|--------|-------------|
+| `SwarmTask` | `swarm.tasks` | Coordinator | Research direction assigned to a worker |
+| `SwarmDiscovery` | `swarm.discoveries` | Worker | Findings published after executing a task |
+| `SwarmHeartbeat` | `swarm.heartbeat` | Worker | Liveness signal (alive/busy/error, load, task counts) |
+| `SwarmInquiry` | `swarm.inquiry` | Any agent | A2A question to another agent |
+| `SwarmResponse` | `swarm.response` | Any agent | A2A answer with correlation_id matching |
+
+### Key Design Decisions
+
+1. **Coordinator owns the frontier** — Only the SwarmCoordinator calls `next_action()` and `absorb_findings()`. Workers are stateless task executors. This avoids distributed locking entirely.
+2. **Workers are DurableMetaAgents** — Each worker inherits the full DSPy pipeline: AgentGenerator, GFL optimization, LSE evolution, Trace2Skill consolidation. No changes to DSPy internals.
+3. **A2A via pub/sub** — Agents discover each other via Dapr AgentRegistry and communicate through topic-routed messages with correlation_ids for request/response matching.
+4. **Heartbeat-based failure detection** — Workers publish liveness every 30s. The coordinator marks a worker offline after 90s of silence and reassigns its tasks.
+
+### Running the Swarm
+
+```bash
+# Production: Separate Dapr apps
+dapr run -f lab/14_durable_meta_agent/dapr/swarm-multi-app-run.yaml
+
+# Development: In-process swarm
+uv run python -m lab.14_durable_meta_agent \
+  --query "Research topic" --iterations 10 swarm --workers 3
+
+# Manual: Start coordinator + workers individually
+dapr run --app-id swarm-coordinator --app-protocol grpc --app-port 8000 ... swarm-coordinator
+dapr run --app-id swarm-worker-0 --app-protocol grpc --app-port 8001 ... swarm-worker --worker-id swarm-worker-0
+dapr run --app-id swarm-worker-1 --app-protocol grpc --app-port 8002 ... swarm-worker --worker-id swarm-worker-1
+```
 
 ## Research Foundation
 
