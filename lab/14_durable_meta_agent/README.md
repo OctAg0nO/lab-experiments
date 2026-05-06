@@ -340,6 +340,137 @@ dapr run --app-id swarm-worker-0 --app-protocol grpc --app-port 8001 ... swarm-w
 dapr run --app-id swarm-worker-1 --app-protocol grpc --app-port 8002 ... swarm-worker --worker-id swarm-worker-1
 ```
 
+## Real-World Example Projects
+
+### 1. Continuous Vulnerability Research & Automated Patching
+
+A swarm that monitors CVE feeds, researches exploits, generates verified patches using Z3 formal verification, sandbox-tests them via E2B, deploys fixes via Terraform, and logs the full audit trail to MLflow.
+
+```mermaid
+flowchart LR
+    subgraph Coordinator
+        FR["DaprFrontier<br/>CVE queue"]
+    end
+    subgraph W1["Researcher Agent"]
+        CV["crawl4ai + fetch<br/>CVE details & PoC"]
+        AR["ArXiv + Exa<br/>patch literature"]
+    end
+    subgraph W2["Verifier Agent"]
+        Z3["Z3 SMT Solver<br/>constraint verification"]
+        E2["E2B sandbox<br/>runtime validation"]
+    end
+    subgraph W3["Deployer Agent"]
+        TF["Terraform<br/>IaC deployment"]
+        ML["MLflow + Git<br/>audit trail"]
+    end
+
+    FR -->|task: CVE-2026-XXXX| W1
+    W1 -->|findings| FR
+    FR -->|task: verify patch| W2
+    W2 -->|UNSAT proof| FR
+    FR -->|task: deploy| W3
+    W3 -->|commit + deploy| FR
+```
+
+```bash
+uv run python -m lab.14_durable_meta_agent \
+  --query "Monitor NVD feed for critical RCE vulnerabilities in PostgreSQL extensions. For each CVE, research exploit vectors via crawl4ai and Exa, generate a verified patch with Z3 proof of correctness, sandbox-test with E2B, deploy via Terraform, and log the complete audit trail to MLflow and git." \
+  --iterations 50 swarm --workers 4
+```
+
+**Capabilities demonstrated**: Multi-phase research (discovery → deep-read → verify → deploy), formal proof generation, sandboxed execution, immutable audit trail, crash survival across 50+ iterations.
+
+---
+
+### 2. Competitive Intelligence Platform
+
+A swarm of domain-specialized meta agents that continuously monitor competitor products, SEC filings, hiring patterns, patent filings, and social media sentiment. Each worker publishes structured discoveries to pub/sub; the coordinator consolidates them into a living knowledge graph.
+
+```mermaid
+flowchart LR
+    subgraph Coordinator
+        CON["Consolidation<br/>FalkorDB KG"]
+    end
+    subgraph P1["Product Agent"]
+        CW["crawl4ai<br/>changelogs, pricing"]
+        GH["GitHub MCP<br/>commit activity"]
+    end
+    subgraph P2["Legal Agent"]
+        AR["ArXiv + Exa<br/>patent filings"]
+        SEC["SEC EDGAR<br/>financial disclosures"]
+    end
+    subgraph P3["Talent Agent"]
+        LI["LinkedIn<br/>hiring patterns"]
+        SO["social media<br/>sentiment analysis"]
+    end
+    subgraph P4["Signal Agent"]
+        ST["sequential-thinking<br/>threat assessment"]
+        OR["OpenRouter consensus<br/>multi-model scoring"]
+    end
+
+    P1 & P2 & P3 -->|publish discovery| CON
+    CON -->|cross-reference| P4
+    P4 -->|risk score| CON
+```
+
+```bash
+uv run python -m lab.14_durable_meta_agent \
+  --query "Launch competitive intelligence swarm monitoring top 5 competitors. Product tracker: scrape changelogs and pricing pages via crawl4ai every 6 hours. Legal tracker: search USPTO patent filings and SEC EDGAR disclosures via Exa. Talent tracker: analyze LinkedIn hiring patterns and social media sentiment. Signal aggregator: use sequential-thinking + OpenRouter consensus for cross-domain threat assessment. Store all findings in FalkorDB knowledge graph. Publish weekly consolidated brief to filesystem." \
+  --iterations 100 swarm --workers 5
+```
+
+**Capabilities demonstrated**: Heterogeneous worker domains, continuous long-running operation (100+ iterations), pub/sub discovery fan-in, knowledge graph persistence, multi-model consensus for signal assessment.
+
+---
+
+### 3. Self-Healing Production Infrastructure
+
+A swarm that monitors production telemetry (MLflow metrics), detects anomaly patterns, researches root causes via log analysis with sequential-thinking, generates fix candidates using RLM code agents, proofs correctness with Z3, sandbox-rolls out to canary via E2B, and deploys to production via Terraform — all without human intervention.
+
+```mermaid
+flowchart LR
+    subgraph Coordinator
+        FR2["DaprFrontier<br/>anomaly queue"]
+        HB["heartbeat monitor<br/>worker health"]
+    end
+    subgraph M1["Monitor Agent"]
+        MLF["MLflow<br/>metric drift"]
+        ST2["sequential-thinking<br/>root cause"]
+    end
+    subgraph M2["Fix Agent"]
+        RLM["dspy.RLM<br/>code generation"]
+        Z32["Z3 solver<br/>correctness proof"]
+    end
+    subgraph M3["Rollout Agent"]
+        E2B2["E2B sandbox<br/>canary test"]
+        TF2["Terraform<br/>prod deploy"]
+    end
+    subgraph M4["Verify Agent"]
+        SNK["Snyk security<br/>SAST scan"]
+        PG["Postgres<br/>canary metrics"]
+    end
+
+    MLF -->|latency spike| FR2
+    FR2 -->|diagnose| M1
+    M1 -->|root cause| FR2
+    FR2 -->|generate fix| M2
+    M2 -->|patch + proof| FR2
+    FR2 -->|canary 5%| M3
+    M3 -->|canary metrics| M4
+    M4 -->|verified| FR2
+    FR2 -->|rollout 100%| M3
+```
+
+```bash
+uv run python -m lab.14_durable_meta_agent \
+  --query "Deploy self-healing infrastructure monitor. Watch MLflow for latency p99 > 500ms or error rate > 1%. On anomaly: use sequential-thinking to decompose root cause from log patterns. Generate fix via RLM code agent. Prove fix correctness with Z3 SMT solver. Roll out to 5% canary via E2B sandbox. Validate canary metrics in Postgres. Full rollout via Terraform if metrics improve. Rollback automatically if degradation detected. Log every decision to MLflow." \
+  --iterations 200 swarm --workers 4
+```
+
+**Capabilities demonstrated**: Closed-loop observability → diagnosis → fix → verify → deploy → monitor, automatic rollback on degradation, formal proof of fix correctness, canary-based staged rollout, crash survival across 200+ iterations.
+
+---
+
 ## Research Foundation
 
 All DSPy research foundations from Lab 13 apply unchanged:
