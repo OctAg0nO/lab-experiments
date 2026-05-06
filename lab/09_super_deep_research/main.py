@@ -14,7 +14,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import dspy
 
-from .mcp.client import MCPClient
+from lab.shared.mcp import MCPClient
 from .frontier import ResearchFrontier
 from .memory.store import MemoryStore
 from .orchestrator import ResearchOrchestrator

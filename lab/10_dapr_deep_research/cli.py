@@ -16,8 +16,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..shared.config import get_lm_model, get_student_lm_model, get_lm_temperature, get_agent_port
-from .mcp.client import MCPClient
-from .mcp.bridge import MCPBridge
+from lab.shared.mcp import MCPClient, MCPBridge
 from .memory.dapr_frontier import DaprFrontier
 from .memory.frontier import InMemoryFrontier
 from .memory.noop_store import NoopStore

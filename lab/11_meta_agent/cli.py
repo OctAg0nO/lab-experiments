@@ -13,8 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..shared.config import get_lm_model, get_student_lm_model, get_lm_temperature
-from .mcp.client import MCPClient
-from .mcp.bridge import MCPBridge
+from lab.shared.mcp import MCPClient, MCPBridge
 from .meta.agent_generator import AgentGenerator
 from .meta.meta_agent import MetaAgent, ResourceBudget
 from .evolution.gfl import GFLPipeline

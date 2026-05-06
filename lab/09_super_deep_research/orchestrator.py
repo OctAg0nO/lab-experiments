@@ -18,7 +18,7 @@ from .evolution.trace2skill import SkillConsolidator
 from .agents import (
     create_explorer, create_deep_reader, create_synthesizer, create_critic,
 )
-from .mcp.client import MCPClient
+from lab.shared.mcp import MCPClient
 
 
 def _default_quality_fn(state: dict) -> float:

@@ -26,6 +26,7 @@ flowchart LR
         P2["10_dapr_deep_research<br/>DurableAgent + DSPy deltas"]
         P3["11_meta_agent<br/>Dynamic agent generation"]
         P4["12_formal_evolution<br/>Z3 + Lean4 + OpenRouter MCP"]
+        P5["13_autonomous_factory<br/>23 MCP servers + verification + IaC"]
     end
     subgraph Util["Utilities"]
         S1["99-sandbox<br/>Scratch space"]
@@ -67,4 +68,11 @@ dapr run -f lab/10_dapr_deep_research/dapr-multi-app-run.yaml
 
 # Formal evolution: Z3 + Lean4 + OpenRouter MCP consensus
 uv run python -m lab.12_formal_evolution --query "Verify sorting algorithm correctness" run
+
+# Autonomous Software Factory: 23 MCP servers, sandboxed execution, IaC
+uv run python -m lab.13_autonomous_factory --query "Research + verify + deploy" run
+
+# List MCP servers and run health checks
+uv run python -m lab.13_autonomous_factory list-servers
+uv run python -m lab.13_autonomous_factory health
 ```

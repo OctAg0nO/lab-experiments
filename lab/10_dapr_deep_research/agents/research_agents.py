@@ -18,7 +18,7 @@ from dapr_agents.workflow import workflow_entry
 
 from lab.shared.config import get_dapr_state_store
 from lab.shared.research import MAX_BOOTSTRAPPED_DEMOS, MAX_LABELED_DEMOS
-from ..mcp.bridge import MCPBridge
+from lab.shared.mcp import MCPBridge
 
 # ---------------------------------------------------------------------------
 # Pydantic output models
