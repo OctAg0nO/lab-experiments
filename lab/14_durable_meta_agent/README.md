@@ -231,6 +231,29 @@ for iteration, direction, entry, prediction, quality, state in meta.run_stack_it
 
 The original Lab 13 CLI had 6 commands (`optimize`, `distill`, and incorrectly-wired `generate`/`run`/`stack`/`gfl`) that referenced non-existent methods on `MetaAgent`/`GFLPipeline`. These were removed or fixed. The remaining commands now call the correct APIs: `generate_agents()`, `run_stack()`, `snapshot()`.
 
+### Continue-as-New Workflow History
+
+Long-running `DurableMetaAgent` workflows (50+ iterations) accumulate execution history in the Dapr state store, which degrades performance over time. The Continue-as-New pattern restarts the workflow after a configurable number of iterations, resetting the history while preserved state (frontier, LSE runs, agent stack) lives in Redis.
+
+Enable via `DurableMetaConfig`:
+
+```python
+config = DurableMetaConfig(max_iterations_per_segment=20)
+```
+
+After every 20 iterations, the workflow spawns a new `run_research` instance with `ctx.call_workflow()`, passing current state. The old workflow terminates cleanly. The new one resumes from the last checkpoint.
+
+### Delta-Update State Keys
+
+`DaprAgentStack` uses per-entry state store keys instead of saving the full agent list on every mutation:
+
+```
+{key}:meta          →  ordered list of agent names (small, O(1) write)
+{key}:entries:{name}  →  individual agent entry (one per agent, O(1) write)
+```
+
+This means `push()` is a single-entry write regardless of how many agents exist. `record_run()` and `record_failure()` only update that agent's key. Full-state saves only happen on `pop()` (rare). Same dirty-flag pattern as `DaprFrontier` — mutations are cheap, persistence is batched.
+
 ## Swarm Mode: Multi-Agent Coordination
 
 Lab 14 supports running a **swarm of meta agents** that coordinate via Dapr pub/sub and A2A (Agent-to-Agent) protocol.

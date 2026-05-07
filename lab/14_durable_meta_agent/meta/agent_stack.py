@@ -112,75 +112,83 @@ class AgentStack:
 
 
 class DaprAgentStack(AgentStack):
-    """AgentStack with Dapr StateStoreService persistence.
+    """AgentStack with per-entry state store keys (delta-updates).
 
-    Uses a cached store instance (not lazy import per call).
-    Fail-fast if Dapr/Redis is down.
+    Each agent entry is stored under its own key: {base_key}:entries:{name}.
+    Metadata (entry list order) is stored under {base_key}:meta.
+    push() is O(1) — only writes the new entry. Full-state saves
+    (pop, record_run, record_failure) use O(N) writes but happen rarely.
     """
+
+    _entry_fields = [
+        "name", "role", "goal", "signature", "tools", "use_code",
+        "prompt_template", "created_at", "run_count", "avg_quality",
+        "failure_count",
+    ]
 
     def __init__(self, store_name: str = "meta-state", key: str = "agent_stack"):
         self._store = StateStoreService(store_name=store_name)
         self._key = key
+        self._entries_key = f"{key}:entries"
+        self._meta_key = f"{key}:meta"
         super().__init__()
         self._load()
 
-    def _load(self):
-        raw = self._store.load(key=self._key)
-        if raw:
-            data = raw if isinstance(raw, dict) else {}
-            for item in data.get("entries", []):
-                entry = AgentEntry(
-                    name=item["name"],
-                    role=item.get("role", ""),
-                    goal=item.get("goal", ""),
-                    signature=item.get("signature", "task -> result"),
-                    tools=item.get("tools", []),
-                    use_code=item.get("use_code", False),
-                    prompt_template=item.get("prompt_template", ""),
-                    created_at=item.get("created_at", ""),
-                    run_count=item.get("run_count", 0),
-                    avg_quality=item.get("avg_quality", 0.0),
-                    failure_count=item.get("failure_count", 0),
-                )
-                self._entries.append(entry)
-                self._by_name[entry.name] = entry
+    def _entry_to_dict(self, e: AgentEntry) -> dict:
+        return {f: getattr(e, f) for f in self._entry_fields}
 
-    def _save(self):
+    @staticmethod
+    def _dict_to_entry(d: dict) -> AgentEntry:
+        return AgentEntry(
+            name=d.get("name", ""),
+            role=d.get("role", ""),
+            goal=d.get("goal", ""),
+            signature=d.get("signature", "task -> result"),
+            tools=d.get("tools", []),
+            use_code=d.get("use_code", False),
+            prompt_template=d.get("prompt_template", ""),
+            created_at=d.get("created_at", ""),
+            run_count=d.get("run_count", 0),
+            avg_quality=d.get("avg_quality", 0.0),
+            failure_count=d.get("failure_count", 0),
+        )
+
+    def _load(self):
+        meta_raw = self._store.load(key=self._meta_key)
+        if meta_raw:
+            names = meta_raw if isinstance(meta_raw, list) else meta_raw.get("names", [])
+            for name in names:
+                raw = self._store.load(key=f"{self._entries_key}:{name}")
+                if raw:
+                    entry = self._dict_to_entry(raw if isinstance(raw, dict) else {})
+                    self._entries.append(entry)
+                    self._by_name[entry.name] = entry
+
+    def _save_meta(self):
         self._store.save(
-            key=self._key,
-            value={
-                "entries": [
-                    {
-                        "name": e.name,
-                        "role": e.role,
-                        "goal": e.goal,
-                        "signature": e.signature,
-                        "tools": e.tools,
-                        "use_code": e.use_code,
-                        "prompt_template": e.prompt_template,
-                        "created_at": e.created_at,
-                        "run_count": e.run_count,
-                        "avg_quality": e.avg_quality,
-                        "failure_count": e.failure_count,
-                    }
-                    for e in self._entries
-                ]
-            },
+            key=self._meta_key,
+            value={"names": [e.name for e in self._entries]},
         )
 
     def push(self, entry: AgentEntry) -> None:
         super().push(entry)
-        self._save()
+        self._store.save(key=f"{self._entries_key}:{entry.name}", value=self._entry_to_dict(entry))
+        self._save_meta()
 
     def pop(self) -> Optional[AgentEntry]:
         entry = super().pop()
-        self._save()
+        if entry:
+            self._store.save(key=self._meta_key, value={"names": [e.name for e in self._entries]})
         return entry
 
     def record_run(self, name: str, quality: float) -> None:
         super().record_run(name, quality)
-        self._save()
+        entry = self._by_name.get(name)
+        if entry:
+            self._store.save(key=f"{self._entries_key}:{name}", value=self._entry_to_dict(entry))
 
     def record_failure(self, name: str) -> None:
         super().record_failure(name)
-        self._save()
+        entry = self._by_name.get(name)
+        if entry:
+            self._store.save(key=f"{self._entries_key}:{name}", value=self._entry_to_dict(entry))
