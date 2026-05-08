@@ -207,6 +207,7 @@ agent = DurableMetaAgent(
         enable_tracing=True,
         use_dapr_frontier=True,
         use_dapr_lse=True,
+        max_iterations_per_segment=20,  # Continue-as-New every 20 iterations
     ),
 )
 ```
