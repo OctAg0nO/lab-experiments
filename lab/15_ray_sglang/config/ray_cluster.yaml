@@ -1,0 +1,25 @@
+# Ray cluster configuration for Lab 15
+# Used when --ray flag is passed. If no external cluster is running,
+# ray.init() is called with these defaults (single-node mode).
+
+cluster_name: ray-lab15
+min_workers: 0
+max_workers: 2
+
+# Provider: local single-node or AWS/K8s for production
+provider:
+  type: local
+  head_ip: auto
+
+# Node config
+available_node_types:
+  worker:
+    min_workers: 0
+    max_workers: 2
+    resources:
+      CPU: 8
+      GPU: 1
+
+# Autoscaling
+upscaling_speed: 1.0
+idle_timeout_minutes: 5

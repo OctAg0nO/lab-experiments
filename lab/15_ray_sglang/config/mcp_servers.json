@@ -1,0 +1,251 @@
+{
+  "mcpServers": {
+    "scrapling": {
+      "description": "Stealth web scraping — anti-bot bypass, sessions, CSS selectors, bulk fetch",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--with", "scrapling[ai]", "scrapling", "mcp"]
+    },
+    "crawl4ai": {
+      "description": "Deep web scraping and content extraction via Docker",
+      "enabled": true,
+      "type": "sse",
+      "url": "http://localhost:11235/mcp/sse"
+    },
+    "fetch": {
+      "description": "Quick URL fetching and markdown extraction",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "openrouter": {
+      "description": "Access 100+ models via OpenRouter for multi-model consensus",
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@physics91/openrouter-mcp", "start"],
+      "env": {
+        "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"
+      }
+    },
+    "arxiv": {
+      "description": "Search, download, and read arXiv research papers",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["arxiv-mcp-server"]
+    },
+    "filesystem": {
+      "description": "Read, write, search, and manage local files and directories",
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "git": {
+      "description": "Interact with Git repositories — status, diff, log, commit, branches",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "."]
+    },
+    "mlflow": {
+      "description": "MLflow trace management — search, analyze, and log assessments on LLM traces",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--with", "mlflow[mcp]>=3.5.1", "mlflow", "mcp", "run"],
+      "env": {
+        "MLFLOW_TRACKING_URI": "http://localhost:5000",
+        "MLFLOW_MCP_TOOLS": "genai"
+      }
+    },
+    "memory": {
+      "description": "Knowledge graph-based persistent memory system",
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "sequential-thinking": {
+      "description": "Dynamic and reflective problem-solving through thought sequences",
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "time": {
+      "description": "Time and timezone conversion capabilities",
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-time"]
+    },
+    "exa-search": {
+      "description": "Neural web search and content retrieval — semantic, code, company, people search",
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "exa-mcp-server"],
+      "env": {
+        "EXA_API_KEY": "${EXA_API_KEY}"
+      }
+    },
+    "snyk-security": {
+      "description": "Static analysis security scanning — code, dependencies, containers, IaC, SBOM",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "snyk@latest", "mcp", "-t", "stdio"],
+      "env": {
+        "SNYK_MCP_PROFILE": "full"
+      }
+    },
+    "terraform": {
+      "description": "Terraform Registry operations — provider lookup, module search, resource details",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "terraform-mcp-server"]
+    },
+    "falkordb": {
+      "description": "FalkorDB knowledge graph — query, create, manage graph data via OpenCypher",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@falkordb/mcpserver@latest"],
+      "env": {
+        "FALKORDB_HOST": "localhost",
+        "FALKORDB_PORT": "6379",
+        "FALKORDB_USERNAME": "",
+        "FALKORDB_PASSWORD": ""
+      }
+    },
+    "wolfram-alpha": {
+      "description": "Wolfram Alpha computational intelligence — symbolic math, physics, chemistry, data",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-wolfram-alpha"],
+      "env": {
+        "WOLFRAM_ALPHA_APP_ID": "${WOLFRAM_ALPHA_APP_ID}"
+      }
+    },
+    "playwright": {
+      "description": "Browser automation and web scraping via Playwright",
+      "enabled": false,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-playwright"]
+    },
+    "puppeteer": {
+      "description": "Browser automation and web scraping via Puppeteer",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+    },
+    "postgres": {
+      "description": "Read-only PostgreSQL database access with schema inspection",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost:5432/postgres"]
+    },
+    "sqlite": {
+      "description": "SQLite database interaction and business intelligence",
+      "enabled": false,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "./data.db"]
+    },
+    "redis": {
+      "description": "Interact with Redis key-value stores",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-redis", "redis://localhost:6379"]
+    },
+    "brave-search": {
+      "description": "Web and local search using Brave's Search API",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      }
+    },
+    "e2b-sandbox": {
+      "description": "Sandboxed code execution via E2B — Python, JavaScript, and shell",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "e2b-mcp-server"],
+      "env": {
+        "E2B_API_KEY": "${E2B_API_KEY}"
+      }
+    },
+    "github": {
+      "description": "GitHub API — repositories, issues, pull requests, file operations",
+      "enabled": false,
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["github-mcp-server"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "slack": {
+      "description": "Slack channel management and messaging",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "env": {
+        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
+        "SLACK_TEAM_ID": "${SLACK_TEAM_ID}"
+      }
+    },
+    "google-maps": {
+      "description": "Location services, directions, and place details",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-google-maps"],
+      "env": {
+        "GOOGLE_MAPS_API_KEY": "${GOOGLE_MAPS_API_KEY}"
+      }
+    },
+    "sentry": {
+      "description": "Retrieve and analyze issues from Sentry.io",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sentry"],
+      "env": {
+        "SENTRY_TOKEN": "${SENTRY_TOKEN}"
+      }
+    },
+    "everything": {
+      "description": "Reference/test server with prompts, resources, and tools for debugging",
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"]
+    },
+    "observability": {
+      "description": "MLflow observability — trace search, feedback logging, expectations",
+      "enabled": true,
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--with", "mlflow[mcp]>=3.5.1", "mlflow", "mcp", "run"],
+      "env": {
+        "MLFLOW_TRACKING_URI": "http://localhost:5000",
+        "MLFLOW_MCP_TOOLS": "genai"
+      }
+    }
+  }
+}

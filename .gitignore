@@ -18,3 +18,8 @@ wheels/
 
 # Cloned third-party MCP servers (vendored in-tree)
 lab/12_formal_evolution/z3_mcp/
+
+# Qwen3-TTS generated audio files
+*.wav
+*.mp3
+voice_clone_*.wav

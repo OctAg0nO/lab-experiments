@@ -11,3 +11,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "ruff>=0.15.12",
 ]
+
+[project.optional-dependencies]
+ray = ["ray[default]"]
+sglang = ["sglang[all]"]
+livekit = ["livekit-agents[openai,silero,deepgram,cartesia,turn-detector]"]
+qwen3-tts = ["qwen-tts", "flash-attn"]
+lab15 = ["experiments[ray]", "experiments[sglang]", "experiments[livekit]", "experiments[qwen3-tts]"]

@@ -28,6 +28,7 @@ flowchart LR
         P4["12_formal_evolution<br/>Z3 + Lean4 + OpenRouter MCP"]
         P5["13_autonomous_factory<br/>23 MCP servers + verification + IaC"]
         P6["14_durable_meta_agent<br/>DurableAgent + Dapr production framework"]
+        P7["15_ray_sglang<br/>Ray + SGLang distributed high-throughput meta-agent"]
     end
     subgraph Util["Utilities"]
         S1["99-sandbox<br/>Scratch space"]
@@ -47,7 +48,7 @@ cp .env.example .env   # fill in DEEPSEEK_API_KEY and configure models
 
 ## Documentation
 
-Complete API reference for every module is in [`docs/`](docs/INDEX.md) — signatures, classes, functions, DSPy modules, and usage patterns for all 14 sub-projects.
+Complete API reference for every module is in [`docs/`](docs/INDEX.md) — signatures, classes, functions, DSPy modules, and usage patterns for all 15 sub-projects.
 
 ## Running
 
@@ -81,6 +82,19 @@ dapr run --app-id durable-meta-agent --app-protocol grpc --app-port 8000 \
   --resources-path lab/14_durable_meta_agent/dapr/resources -- \
   uv run python -m lab.14_durable_meta_agent --query "Research topic" \
   dapr-orchestrator --tracing --dapr-frontier --dapr-lse
+
+# Ray + SGLang: Distributed high-throughput meta-agent (requires SGLang server running)
+uv run python -m lab.15_ray_sglang --query "Research topic" \
+  --sglang-endpoint http://localhost:30000/v1 --ray run
+
+# Lab 15 with launch scripts (start SGLang first):
+bash lab/15_ray_sglang/scripts/launch_sglang.sh
+uv run python -m lab.15_ray_sglang --query "Research topic" \
+  --sglang-endpoint http://localhost:30000/v1 --ray run
+
+# Lab 15b: LiveKit voice agent + A2UI (see integration plan):
+bash lab/15_ray_sglang/scripts/launch_sglang.sh
+uv run python -m lab.15_ray_sglang --sglang-endpoint http://localhost:30000/v1 livekit-worker
 
 # List MCP servers and run health checks
 uv run python -m lab.13_autonomous_factory list-servers

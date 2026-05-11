@@ -1,0 +1,20 @@
+# LiveKit server configuration for Lab 15b
+# Used by livekit-worker CLI command.
+#
+# Start the LiveKit server:
+#   docker run --rm -p 7880:7880 -p 7881:7881 \
+#     -v ./livekit.yaml:/etc/livekit.yaml \
+#     livekit/livekit-server --config /etc/livekit.yaml
+
+port: 7880
+rtc:
+  port_range_start: 50000
+  port_range_end: 50200
+  use_external_ip: false
+  udp_port: 7881
+
+log_level: info
+
+api:
+  keys:
+    devkey: devsecret

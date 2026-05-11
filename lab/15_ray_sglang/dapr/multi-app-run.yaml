@@ -1,0 +1,16 @@
+version: 1
+apps:
+  - appID: durable-meta-agent
+    appDirPath: ../../
+    appPort: 8000
+    command:
+      [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "lab.14_durable_meta_agent",
+        "dapr-orchestrator",
+      ]
+    appProtocol: grpc
+    resourcesPath: lab/14_durable_meta_agent/dapr/resources
